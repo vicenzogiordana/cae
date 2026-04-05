@@ -1,4 +1,4 @@
-defmodule CaeNew.Repo.Migrations.CreateMedicalDocuments do
+defmodule Cae.Repo.Migrations.CreateMedicalDocuments do
   use Ecto.Migration
 
   def change do

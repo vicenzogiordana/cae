@@ -1,4 +1,4 @@
-defmodule CaeNew.Repo.Migrations.CreateStudentProfiles do
+defmodule Cae.Repo.Migrations.CreateStudentProfiles do
   use Ecto.Migration
 
   def change do

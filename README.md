@@ -1,4 +1,4 @@
-# CaeNew
+# Cae
 
 To start your Phoenix server:
 

@@ -7,25 +7,25 @@
 # General application configuration
 import Config
 
-config :cae_new,
-  ecto_repos: [CaeNew.Repo],
+config :cae,
+  ecto_repos: [Cae.Repo],
   generators: [timestamp_type: :utc_datetime]
 
 # Configure the endpoint
-config :cae_new, CaeNewWeb.Endpoint,
+config :cae, CaeWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [html: CaeNewWeb.ErrorHTML, json: CaeNewWeb.ErrorJSON],
+    formats: [html: CaeWeb.ErrorHTML, json: CaeWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: CaeNew.PubSub,
+  pubsub_server: Cae.PubSub,
   live_view: [signing_salt: "CJ9GsVfs"]
 
 # Configure tailwind (the version is required)
 config :tailwind,
   version: "4.1.12",
-  cae_new: [
+  cae: [
     args: ~w(
       --input=assets/css/app.css
       --output=priv/static/assets/css/app.css
@@ -42,7 +42,7 @@ config :logger, :default_formatter,
 config :phoenix, :json_library, Jason
 
 # Configure Cloak for encrypting sensitive medical data
-config :cae_new, CaeNew.Vault,
+config :cae, Cae.Vault,
   ciphers: [
     default: {
       Cloak.Ciphers.AES.GCM,

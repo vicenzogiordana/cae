@@ -1,4 +1,4 @@
-defmodule CaeNew.Repo.Migrations.CreateAppointments do
+defmodule Cae.Repo.Migrations.CreateAppointments do
   use Ecto.Migration
 
   def change do

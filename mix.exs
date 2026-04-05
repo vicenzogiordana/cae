@@ -1,9 +1,9 @@
-defmodule CaeNew.MixProject do
+defmodule Cae.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :cae_new,
+      app: :cae,
       version: "0.1.0",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -20,7 +20,7 @@ defmodule CaeNew.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {CaeNew.Application, []},
+      mod: {Cae.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end
@@ -87,11 +87,11 @@ defmodule CaeNew.MixProject do
       "assets.build": [
         "compile",
         "cmd --cd assets cp node_modules/flyonui/flyonui.js ../priv/static/assets/js/flyonui.js",
-        "tailwind cae_new"
+        "tailwind cae"
       ],
       "assets.deploy": [
         "cmd --cd assets cp node_modules/flyonui/flyonui.js ../priv/static/assets/js/flyonui.js",
-        "tailwind cae_new --minify",
+        "tailwind cae --minify",
         "phx.digest"
       ],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]

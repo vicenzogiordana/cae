@@ -1,4 +1,4 @@
-defmodule CaeNewWeb.ConnCase do
+defmodule CaeWeb.ConnCase do
   @moduledoc """
   This module defines the test case to be used by
   tests that require setting up a connection.
@@ -11,7 +11,7 @@ defmodule CaeNewWeb.ConnCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. If you are using
   PostgreSQL, you can even run database tests asynchronously
-  by setting `use CaeNewWeb.ConnCase, async: true`, although
+  by setting `use CaeWeb.ConnCase, async: true`, although
   this option is not recommended for other databases.
   """
 
@@ -20,19 +20,19 @@ defmodule CaeNewWeb.ConnCase do
   using do
     quote do
       # The default endpoint for testing
-      @endpoint CaeNewWeb.Endpoint
+      @endpoint CaeWeb.Endpoint
 
-      use CaeNewWeb, :verified_routes
+      use CaeWeb, :verified_routes
 
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest
-      import CaeNewWeb.ConnCase
+      import CaeWeb.ConnCase
     end
   end
 
   setup tags do
-    CaeNew.DataCase.setup_sandbox(tags)
+    Cae.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

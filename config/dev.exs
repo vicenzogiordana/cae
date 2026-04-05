@@ -1,11 +1,11 @@
 import Config
 
 # Configure your database
-config :cae_new, CaeNew.Repo,
+config :cae, Cae.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  database: "cae_new_dev",
+  database: "cae_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
@@ -16,7 +16,7 @@ config :cae_new, CaeNew.Repo,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :cae_new, CaeNewWeb.Endpoint,
+config :cae, CaeWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}],
@@ -25,7 +25,7 @@ config :cae_new, CaeNewWeb.Endpoint,
   debug_errors: true,
   secret_key_base: "FRnKHAUYXFPBqauG8JVa806HL0gfuqqxIdrczxh3d8J+23a3Skh64Ww74aWXfE5X",
   watchers: [
-    tailwind: {Tailwind, :install_and_run, [:cae_new, ~w(--watch)]}
+    tailwind: {Tailwind, :install_and_run, [:cae, ~w(--watch)]}
   ]
 
 # ## SSL Support
@@ -52,7 +52,7 @@ config :cae_new, CaeNewWeb.Endpoint,
 # different ports.
 
 # Reload browser tabs when matching files change.
-config :cae_new, CaeNewWeb.Endpoint,
+config :cae, CaeWeb.Endpoint,
   live_reload: [
     web_console_logger: true,
     patterns: [
@@ -61,13 +61,13 @@ config :cae_new, CaeNewWeb.Endpoint,
       # Gettext translations
       ~r"priv/gettext/.*\.po$"E,
       # Router, Controllers, LiveViews and LiveComponents
-      ~r"lib/cae_new_web/router\.ex$"E,
-      ~r"lib/cae_new_web/(controllers|live|components)/.*\.(ex|heex)$"E
+      ~r"lib/cae_web/router\.ex$"E,
+      ~r"lib/cae_web/(controllers|live|components)/.*\.(ex|heex)$"E
     ]
   ]
 
 # Enable dev routes for dashboard and mailbox
-config :cae_new, dev_routes: true
+config :cae, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
