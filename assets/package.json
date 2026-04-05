@@ -1,0 +1,8 @@
+{
+  "name": "cae_new_assets",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "flyonui": "^2.4.1"
+  }
+}

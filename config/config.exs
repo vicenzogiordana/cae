@@ -41,6 +41,17 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Configure Cloak for encrypting sensitive medical data
+config :cae_new, CaeNew.Vault,
+  ciphers: [
+    default: {
+      Cloak.Ciphers.AES.GCM,
+      tag: "AES.GCM.V1",
+      key: Base.decode64!("tnDKk8h+O5MzE8F/9qV6z9N0L7u5W2p8Q3k1j4M6x9B5A2c="),
+      iv_length: 12
+    }
+  ]
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"
