@@ -320,4 +320,198 @@ defmodule Cae.Scheduling do
   def delete_appointment(%Appointment{} = appointment) do
     Repo.delete(appointment)
   end
+
+  @doc """
+  Creates recurring availability in bulk using a single `insert_all` inside a transaction.
+
+  Parameters are expected as strings from LiveView forms:
+  - weekday: "1".."7" (1 Monday, 7 Sunday)
+  - start_time: "HH:MM"
+  - end_time: "HH:MM"
+  - duration_minutes: "20", "30", etc.
+  - repeat_weeks: "1", "4", "8", "16"
+  """
+  def create_recurring_availability(
+        professional_id,
+        weekday,
+        start_time,
+        end_time,
+        duration_minutes,
+        repeat_weeks
+      ) do
+    with {:ok, professional} <- fetch_professional(professional_id),
+         {:ok, weekday_int} <- parse_weekday(weekday),
+         {:ok, duration_int} <- parse_positive_int(duration_minutes),
+         {:ok, repeat_weeks_int} <- parse_positive_int(repeat_weeks),
+         {:ok, start_time_struct} <- parse_time(start_time),
+         {:ok, end_time_struct} <- parse_time(end_time),
+         :ok <- validate_time_range(start_time_struct, end_time_struct) do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      entries =
+        build_recurring_entries(
+          professional.id,
+          Date.utc_today(),
+          weekday_int,
+          start_time_struct,
+          end_time_struct,
+          duration_int,
+          repeat_weeks_int,
+          now
+        )
+
+      Repo.transaction(fn ->
+        {inserted_count, _} = Repo.insert_all(Appointment, entries)
+        inserted_count
+      end)
+    end
+  end
+
+  @doc """
+  Returns future available appointments for professionals with psychologist role.
+  """
+  def list_future_available_psychologist_appointments do
+    now = DateTime.utc_now()
+
+    from(a in Appointment,
+      join: p in assoc(a, :professional),
+      where: a.status == "available" and a.start_at > ^now and p.role == "psychologist",
+      preload: [professional: p],
+      order_by: [asc: a.start_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Atomically books an appointment only if it is currently available.
+  """
+  def book_available_appointment_for_student(appointment_id, student_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.transaction(fn ->
+      query =
+        from(a in Appointment,
+          where: a.id == ^appointment_id and a.status == "available"
+        )
+
+      case Repo.update_all(query,
+             set: [
+               status: "booked",
+               student_id: student_id,
+               booked_by_id: student_id,
+               updated_at: now
+             ],
+             returning: true
+           ) do
+        {1, [appointment]} -> Repo.preload(appointment, [:professional, :student, :booked_by])
+        _ -> Repo.rollback(:not_available)
+      end
+    end)
+  end
+
+  defp fetch_professional(professional_id) do
+    professional = Repo.get(Cae.Accounts.User, professional_id)
+
+    cond do
+      is_nil(professional) ->
+        {:error, :professional_not_found}
+
+      professional.role in ["psychologist", "psychiatrist", "psychopedagogue"] ->
+        {:ok, professional}
+
+      true ->
+        {:error, :not_professional}
+    end
+  end
+
+  defp parse_weekday(value) do
+    with {:ok, integer} <- parse_positive_int(value),
+         true <- integer >= 1 and integer <= 7 do
+      {:ok, integer}
+    else
+      _ -> {:error, :invalid_weekday}
+    end
+  end
+
+  defp parse_positive_int(value) when is_integer(value) and value > 0, do: {:ok, value}
+
+  defp parse_positive_int(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {integer, ""} when integer > 0 -> {:ok, integer}
+      _ -> {:error, :invalid_duration}
+    end
+  end
+
+  defp parse_positive_int(_), do: {:error, :invalid_duration}
+
+  defp parse_time(value) when is_binary(value) do
+    normalized = if String.length(value) == 5, do: value <> ":00", else: value
+
+    case Time.from_iso8601(normalized) do
+      {:ok, time} -> {:ok, time}
+      _ -> {:error, :invalid_time}
+    end
+  end
+
+  defp parse_time(_), do: {:error, :invalid_time}
+
+  defp validate_time_range(start_time, end_time) do
+    if Time.compare(start_time, end_time) == :lt do
+      :ok
+    else
+      {:error, :invalid_time_range}
+    end
+  end
+
+  defp build_recurring_entries(
+         professional_id,
+         from_date,
+         weekday,
+         start_time,
+         end_time,
+         duration_minutes,
+         repeat_weeks,
+         now
+       ) do
+    first_date = next_weekday_on_or_after(from_date, weekday)
+
+    0..(repeat_weeks - 1)
+    |> Enum.flat_map(fn week_offset ->
+      date = Date.add(first_date, week_offset * 7)
+      build_day_entries(date, professional_id, start_time, end_time, duration_minutes, now)
+    end)
+  end
+
+  defp build_day_entries(date, professional_id, start_time, end_time, duration_minutes, now) do
+    day_start = NaiveDateTime.new!(date, start_time)
+    day_end = NaiveDateTime.new!(date, end_time)
+
+    Stream.iterate(day_start, &NaiveDateTime.add(&1, duration_minutes * 60, :second))
+    |> Enum.take_while(fn slot_start ->
+      slot_end = NaiveDateTime.add(slot_start, duration_minutes * 60, :second)
+      NaiveDateTime.compare(slot_end, day_end) != :gt
+    end)
+    |> Enum.map(fn slot_start ->
+      slot_end = NaiveDateTime.add(slot_start, duration_minutes * 60, :second)
+      start_at = DateTime.from_naive!(slot_start, "Etc/UTC")
+      end_at = DateTime.from_naive!(slot_end, "Etc/UTC")
+
+      %{
+        professional_id: professional_id,
+        student_id: nil,
+        booked_by_id: nil,
+        start_at: start_at,
+        end_at: end_at,
+        status: "available",
+        inserted_at: now,
+        updated_at: now
+      }
+    end)
+  end
+
+  defp next_weekday_on_or_after(date, weekday) do
+    current = Date.day_of_week(date)
+    days_until = rem(weekday - current + 7, 7)
+    Date.add(date, days_until)
+  end
 end

@@ -3,6 +3,8 @@ defmodule CaeWeb.PageControllerTest do
 
   test "GET /", %{conn: conn} do
     conn = get(conn, ~p"/")
-    assert html_response(conn, 200) =~ "Peace of mind from prototype to production"
+    html = html_response(conn, 200)
+    assert html =~ "CAE"
+    assert html =~ "app-shell-drawer"
   end
 end

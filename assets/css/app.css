@@ -1,12 +1,14 @@
 /* See the Tailwind configuration guide for advanced usage
    https://tailwindcss.com/docs/configuration */
 
-@import "tailwindcss" source(none);
+@import "tailwindcss";
 @source "../css";
 @source "../js";
 @source "../../lib/cae_web";
-@import "../node_modules/flyonui/flyonui.css";
-@import "../node_modules/flyonui/variants.css";
+
+@plugin "flyonui" {
+   themes: perplexity --default, dark --prefersdark;
+}
 
 /* A Tailwind plugin that makes "hero-#{ICON}" classes available.
    The heroicons installation itself is managed by your mix.exs */

@@ -20,8 +20,7 @@ if System.get_env("PHX_SERVER") do
   config :cae, CaeWeb.Endpoint, server: true
 end
 
-config :cae, CaeWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+config :cae, CaeWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
 if config_env() == :prod do
   database_url =
