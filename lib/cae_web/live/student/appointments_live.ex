@@ -214,7 +214,14 @@ defmodule CaeWeb.Student.AppointmentsLive do
                   </div>
                   <div class="flex items-center justify-between gap-4">
                     <dt class="text-base-content/60">Cancelado por</dt>
-                    <dd class="font-medium">
+                    <dd class={[
+                      "inline-flex items-center gap-1.5 font-medium",
+                      cancellation_source_text_class(cancellation.cancelled_by_role)
+                    ]}>
+                      <.icon
+                        name={cancellation_source_icon(cancellation.cancelled_by_role)}
+                        class="size-4"
+                      />
                       {cancellation_source_description(cancellation.cancelled_by_role)}
                     </dd>
                   </div>
@@ -439,6 +446,10 @@ defmodule CaeWeb.Student.AppointmentsLive do
   defp cancellation_source_badge_class("student"), do: "badge-warning"
   defp cancellation_source_badge_class("professional"), do: "badge-error"
   defp cancellation_source_badge_class(_), do: "badge-ghost"
+
+  defp cancellation_source_text_class("student"), do: "text-warning"
+  defp cancellation_source_text_class("professional"), do: "text-error"
+  defp cancellation_source_text_class(_), do: "text-base-content/70"
 
   defp cancellation_source_icon("student"), do: "hero-user"
   defp cancellation_source_icon("professional"), do: "hero-user-circle"
