@@ -16,6 +16,16 @@ defmodule Cae.Scheduling do
   alias Cae.Scheduling.Appointment
   alias Cae.Accounts
 
+  @availability_types %{
+    weekday: :string,
+    availability_date: :string,
+    start_time: :string,
+    end_time: :string,
+    recurrence: :string
+  }
+
+  @availability_required_fields [:weekday, :availability_date, :start_time, :end_time]
+
   @doc """
   Gets a single appointment by id.
 
@@ -334,15 +344,19 @@ defmodule Cae.Scheduling do
   def create_recurring_availability(
         professional_id,
         weekday,
+        availability_date,
         start_time,
         end_time,
         duration_minutes,
-        repeat_weeks
+        gap_minutes,
+        recurrence
       ) do
     with {:ok, professional} <- fetch_professional(professional_id),
          {:ok, weekday_int} <- parse_weekday(weekday),
+         {:ok, anchor_date} <- parse_date(availability_date),
          {:ok, duration_int} <- parse_positive_int(duration_minutes),
-         {:ok, repeat_weeks_int} <- parse_positive_int(repeat_weeks),
+         {:ok, gap_int} <- parse_non_negative_int(gap_minutes),
+         {:ok, repeat_weeks_int} <- repeat_weeks_for(recurrence),
          {:ok, start_time_struct} <- parse_time(start_time),
          {:ok, end_time_struct} <- parse_time(end_time),
          :ok <- validate_time_range(start_time_struct, end_time_struct) do
@@ -351,11 +365,12 @@ defmodule Cae.Scheduling do
       entries =
         build_recurring_entries(
           professional.id,
-          Date.utc_today(),
+          anchor_date,
           weekday_int,
           start_time_struct,
           end_time_struct,
           duration_int,
+          gap_int,
           repeat_weeks_int,
           now
         )
@@ -365,6 +380,92 @@ defmodule Cae.Scheduling do
         inserted_count
       end)
     end
+  end
+
+  def create_recurring_availability(
+        professional_id,
+        weekday,
+        start_time,
+        end_time,
+        duration_minutes,
+        gap_minutes,
+        recurrence
+      ) do
+    create_recurring_availability(
+      professional_id,
+      weekday,
+      Date.to_iso8601(Date.utc_today()),
+      start_time,
+      end_time,
+      duration_minutes,
+      gap_minutes,
+      recurrence
+    )
+  end
+
+  @doc """
+  Creates availability from LiveView form params using default slot duration and gap.
+
+  Returns:
+  - `{:ok, inserted_count}` when slots are created
+  - `{:error, changeset}` for validation errors suitable for `to_form/2`
+  """
+  def create_availability(professional_id, params) when is_map(params) do
+    params = stringify_keys(params)
+
+    recurrence =
+      Map.get(params, "recurrence", "none")
+      |> to_string()
+
+    with {:ok, duration_minutes} <- duration_minutes_from_range(params) do
+      case create_recurring_availability(
+             professional_id,
+             Map.get(params, "weekday"),
+             Map.get(params, "availability_date"),
+             Map.get(params, "start_time"),
+             Map.get(params, "end_time"),
+             duration_minutes,
+             0,
+             recurrence
+           ) do
+        {:ok, 0} ->
+          {:error,
+           availability_changeset(
+             params,
+             :no_slots_generated
+           )}
+
+        {:ok, inserted_count} ->
+          {:ok, inserted_count}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:error, changeset}
+
+        {:error, reason} ->
+          {:error, availability_changeset(params, reason)}
+      end
+    else
+      {:error, reason} -> {:error, availability_changeset(params, reason)}
+    end
+  end
+
+  def create_recurring_availability(
+        professional_id,
+        weekday,
+        start_time,
+        end_time,
+        duration_minutes,
+        repeat_weeks
+      ) do
+    create_recurring_availability(
+      professional_id,
+      weekday,
+      start_time,
+      end_time,
+      duration_minutes,
+      0,
+      repeat_weeks
+    )
   end
 
   @doc """
@@ -444,6 +545,29 @@ defmodule Cae.Scheduling do
 
   defp parse_positive_int(_), do: {:error, :invalid_duration}
 
+  defp parse_non_negative_int(value) when is_integer(value) and value >= 0, do: {:ok, value}
+
+  defp parse_non_negative_int(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {integer, ""} when integer >= 0 -> {:ok, integer}
+      _ -> {:error, :invalid_gap}
+    end
+  end
+
+  defp parse_non_negative_int(_), do: {:error, :invalid_gap}
+
+  defp repeat_weeks_for("weekly"), do: {:ok, 1}
+  defp repeat_weeks_for("none"), do: {:ok, 1}
+  defp repeat_weeks_for("never"), do: {:ok, 1}
+  defp repeat_weeks_for("monthly"), do: {:ok, 4}
+  defp repeat_weeks_for("semester"), do: {:ok, 16}
+
+  defp repeat_weeks_for(value) when is_binary(value) do
+    parse_positive_int(value)
+  end
+
+  defp repeat_weeks_for(_), do: {:error, :invalid_repeat_weeks}
+
   defp parse_time(value) when is_binary(value) do
     normalized = if String.length(value) == 5, do: value <> ":00", else: value
 
@@ -454,6 +578,75 @@ defmodule Cae.Scheduling do
   end
 
   defp parse_time(_), do: {:error, :invalid_time}
+
+  defp stringify_keys(params) do
+    Map.new(params, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+      {k, v} -> {k, v}
+    end)
+  end
+
+  defp availability_changeset(params, reason) do
+    {%{}, @availability_types}
+    |> cast(params, [:weekday, :availability_date, :start_time, :end_time, :recurrence])
+    |> validate_required(@availability_required_fields)
+    |> validate_inclusion(:recurrence, ["none", "never", "weekly", "monthly", "semester"])
+    |> map_availability_error(reason)
+    |> Map.put(:action, :insert)
+  end
+
+  defp map_availability_error(changeset, :invalid_weekday),
+    do: add_error(changeset, :weekday, "Dia de semana invalido")
+
+  defp map_availability_error(changeset, :invalid_time),
+    do: add_error(changeset, :start_time, "Formato de hora invalido")
+
+  defp map_availability_error(changeset, :invalid_time_range),
+    do: add_error(changeset, :end_time, "La hora de fin debe ser posterior a la hora de inicio")
+
+  defp map_availability_error(changeset, :no_slots_generated),
+    do: add_error(changeset, :end_time, "No se pudo crear disponibilidad para ese rango horario")
+
+  defp map_availability_error(changeset, :invalid_repeat_weeks),
+    do: add_error(changeset, :recurrence, "Recurrencia invalida")
+
+  defp map_availability_error(changeset, :professional_not_found),
+    do: add_error(changeset, :weekday, "Profesional no encontrado")
+
+  defp map_availability_error(changeset, :not_professional),
+    do: add_error(changeset, :weekday, "El usuario no es un profesional valido")
+
+  defp map_availability_error(changeset, :invalid_duration),
+    do: add_error(changeset, :start_time, "No se pudo interpretar la duracion de los bloques")
+
+  defp map_availability_error(changeset, :invalid_gap),
+    do: add_error(changeset, :start_time, "No se pudo interpretar la pausa entre bloques")
+
+  defp map_availability_error(changeset, _reason),
+    do: add_error(changeset, :start_time, "No se pudo guardar la disponibilidad")
+
+  defp duration_minutes_from_range(params) do
+    with {:ok, start_time} <- parse_time(Map.get(params, "start_time")),
+         {:ok, end_time} <- parse_time(Map.get(params, "end_time")),
+         :ok <- validate_time_range(start_time, end_time) do
+      minutes = div(Time.diff(end_time, start_time, :second), 60)
+
+      if minutes > 0 do
+        {:ok, minutes}
+      else
+        {:error, :invalid_time_range}
+      end
+    end
+  end
+
+  defp parse_date(value) when is_binary(value) do
+    case Date.from_iso8601(value) do
+      {:ok, date} -> {:ok, date}
+      _ -> {:error, :invalid_date}
+    end
+  end
+
+  defp parse_date(_), do: {:error, :invalid_date}
 
   defp validate_time_range(start_time, end_time) do
     if Time.compare(start_time, end_time) == :lt do
@@ -470,6 +663,7 @@ defmodule Cae.Scheduling do
          start_time,
          end_time,
          duration_minutes,
+         gap_minutes,
          repeat_weeks,
          now
        ) do
@@ -478,15 +672,33 @@ defmodule Cae.Scheduling do
     0..(repeat_weeks - 1)
     |> Enum.flat_map(fn week_offset ->
       date = Date.add(first_date, week_offset * 7)
-      build_day_entries(date, professional_id, start_time, end_time, duration_minutes, now)
+
+      build_day_entries(
+        date,
+        professional_id,
+        start_time,
+        end_time,
+        duration_minutes,
+        gap_minutes,
+        now
+      )
     end)
   end
 
-  defp build_day_entries(date, professional_id, start_time, end_time, duration_minutes, now) do
+  defp build_day_entries(
+         date,
+         professional_id,
+         start_time,
+         end_time,
+         duration_minutes,
+         gap_minutes,
+         now
+       ) do
     day_start = NaiveDateTime.new!(date, start_time)
     day_end = NaiveDateTime.new!(date, end_time)
+    step_seconds = (duration_minutes + gap_minutes) * 60
 
-    Stream.iterate(day_start, &NaiveDateTime.add(&1, duration_minutes * 60, :second))
+    Stream.iterate(day_start, &NaiveDateTime.add(&1, step_seconds, :second))
     |> Enum.take_while(fn slot_start ->
       slot_end = NaiveDateTime.add(slot_start, duration_minutes * 60, :second)
       NaiveDateTime.compare(slot_end, day_end) != :gt

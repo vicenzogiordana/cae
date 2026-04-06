@@ -450,7 +450,81 @@ defmodule CaeWeb.CoreComponents do
     """
   end
 
+  @doc """
+  Renders a modal.
+
+  The modal lifecycle is fully controlled by LiveView and does not require
+  third-party JS state management.
+  """
+  attr :id, :string, required: true
+  attr :show, :boolean, default: false
+  attr :on_cancel, JS, default: %JS{}
+
+  slot :inner_block, required: true
+
+  def modal(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      phx-mounted={@show && show_modal(@id)}
+      phx-remove={hide_modal(@id)}
+      data-cancel={JS.exec(@on_cancel, "phx-remove")}
+      class="relative z-50 hidden"
+    >
+      <div id={"#{@id}-bg"} class="fixed inset-0 bg-base-content/40" aria-hidden="true" />
+
+      <div
+        class="fixed inset-0 overflow-y-auto"
+        role="dialog"
+        aria-modal="true"
+        tabindex="0"
+      >
+        <div class="flex min-h-full items-center justify-center p-4 sm:p-6">
+          <div
+            id={"#{@id}-container"}
+            class="w-full max-w-2xl rounded-box border border-base-content/10 bg-base-100 p-6 shadow-xl"
+            phx-click-away={JS.exec("data-cancel", to: "##{@id}")}
+            phx-window-keydown={JS.exec("data-cancel", to: "##{@id}")}
+            phx-key="escape"
+          >
+            {render_slot(@inner_block)}
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
   ## JS Commands
+
+  def show_modal(js \\ %JS{}, id) when is_binary(id) do
+    js
+    |> JS.show(to: "##{id}")
+    |> JS.show(
+      to: "##{id}-bg",
+      transition: {"transition-opacity duration-200", "opacity-0", "opacity-100"}
+    )
+    |> JS.show(
+      to: "##{id}-container",
+      transition: {"transition duration-200", "opacity-0 scale-95", "opacity-100 scale-100"}
+    )
+    |> JS.add_class("overflow-hidden", to: "body")
+    |> JS.focus_first(to: "##{id}-container")
+  end
+
+  def hide_modal(js \\ %JS{}, id) when is_binary(id) do
+    js
+    |> JS.hide(
+      to: "##{id}-bg",
+      transition: {"transition-opacity duration-200", "opacity-100", "opacity-0"}
+    )
+    |> JS.hide(
+      to: "##{id}-container",
+      transition: {"transition duration-200", "opacity-100 scale-100", "opacity-0 scale-95"}
+    )
+    |> JS.hide(to: "##{id}")
+    |> JS.remove_class("overflow-hidden", to: "body")
+  end
 
   def show(js \\ %JS{}, selector) do
     JS.show(js,

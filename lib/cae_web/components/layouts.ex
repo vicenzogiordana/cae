@@ -139,7 +139,7 @@ defmodule CaeWeb.Layouts do
         </nav>
       </aside>
 
-      <div class="relative z-10 pt-16">
+      <div class="relative pt-16">
         <.flash_group flash={@flash} />
 
         <main class="min-h-[calc(100vh-4rem)] w-full min-w-0 px-0 py-0">

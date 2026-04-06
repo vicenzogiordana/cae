@@ -131,4 +131,53 @@ defmodule Cae.SchedulingAppointmentTest do
 
     assert count > 0
   end
+
+  test "create_recurring_availability/7 generates blocks with gap", %{prof: prof} do
+    weekday = Date.day_of_week(Date.utc_today()) |> Integer.to_string()
+
+    {:ok, inserted} =
+      Scheduling.create_recurring_availability(
+        prof.id,
+        weekday,
+        "08:00",
+        "10:00",
+        "30",
+        "10",
+        "weekly"
+      )
+
+    assert inserted == 3
+
+    appointments = Scheduling.list_professional_appointments(prof.id)
+    assert length(appointments) == 3
+    assert Enum.all?(appointments, &(&1.status == "available"))
+  end
+
+  test "list_future_available_psychologist_appointments/0 only returns psychologist slots", %{
+    prof: prof
+  } do
+    {:ok, psychiatrist} =
+      Accounts.create_professional(%{
+        "university_id" => "PSY-TST-#{System.unique_integer([:positive])}",
+        "email" => "psychiatrist-tst-#{System.unique_integer([:positive])}@uni.edu",
+        "first_name" => "Dr.",
+        "last_name" => "Another",
+        "role" => "psychiatrist"
+      })
+
+    future_date = Date.add(Date.utc_today(), 10)
+    psych_start = DateTime.new!(future_date, Time.new!(9, 0, 0), "Etc/UTC")
+    psych_end = DateTime.new!(future_date, Time.new!(9, 30, 0), "Etc/UTC")
+    psych_start_2 = DateTime.new!(future_date, Time.new!(10, 0, 0), "Etc/UTC")
+    psych_end_2 = DateTime.new!(future_date, Time.new!(10, 30, 0), "Etc/UTC")
+
+    Scheduling.create_appointment_slot(prof.id, psych_start, psych_end)
+    Scheduling.create_appointment_slot(psychiatrist.id, psych_start_2, psych_end_2)
+
+    appointments = Scheduling.list_future_available_psychologist_appointments()
+
+    assert length(appointments) == 1
+    assert hd(appointments).professional_id == prof.id
+    assert hd(appointments).professional.role == "psychologist"
+  end
 end

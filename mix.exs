@@ -82,15 +82,21 @@ defmodule Cae.MixProject do
       "assets.setup": [
         "tailwind.install --if-missing",
         "cmd --cd assets npm install",
-        "cmd --cd assets cp node_modules/flyonui/flyonui.js ../priv/static/assets/js/flyonui.js"
+        "cmd --cd assets cp node_modules/flyonui/flyonui.js ../priv/static/assets/js/flyonui.js",
+        "cmd cp deps/phoenix/priv/static/phoenix.min.js priv/static/assets/js/phoenix.min.js",
+        "cmd cp deps/phoenix_live_view/priv/static/phoenix_live_view.min.js priv/static/assets/js/phoenix_live_view.min.js"
       ],
       "assets.build": [
         "compile",
         "cmd --cd assets cp node_modules/flyonui/flyonui.js ../priv/static/assets/js/flyonui.js",
+        "cmd cp deps/phoenix/priv/static/phoenix.min.js priv/static/assets/js/phoenix.min.js",
+        "cmd cp deps/phoenix_live_view/priv/static/phoenix_live_view.min.js priv/static/assets/js/phoenix_live_view.min.js",
         "tailwind cae"
       ],
       "assets.deploy": [
         "cmd --cd assets cp node_modules/flyonui/flyonui.js ../priv/static/assets/js/flyonui.js",
+        "cmd cp deps/phoenix/priv/static/phoenix.min.js priv/static/assets/js/phoenix.min.js",
+        "cmd cp deps/phoenix_live_view/priv/static/phoenix_live_view.min.js priv/static/assets/js/phoenix_live_view.min.js",
         "tailwind cae --minify",
         "phx.digest"
       ],
