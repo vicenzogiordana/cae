@@ -82,18 +82,24 @@ defmodule Cae.MixProject do
       "assets.setup": [
         "tailwind.install --if-missing",
         "cmd --cd assets npm install",
+        "cmd cp assets/js/app.js priv/static/assets/js/app.js",
+        "cmd cp assets/js/hooks.js priv/static/assets/js/hooks.js",
         "cmd --cd assets cp node_modules/flyonui/flyonui.js ../priv/static/assets/js/flyonui.js",
         "cmd cp deps/phoenix/priv/static/phoenix.min.js priv/static/assets/js/phoenix.min.js",
         "cmd cp deps/phoenix_live_view/priv/static/phoenix_live_view.min.js priv/static/assets/js/phoenix_live_view.min.js"
       ],
       "assets.build": [
         "compile",
+        "cmd cp assets/js/app.js priv/static/assets/js/app.js",
+        "cmd cp assets/js/hooks.js priv/static/assets/js/hooks.js",
         "cmd --cd assets cp node_modules/flyonui/flyonui.js ../priv/static/assets/js/flyonui.js",
         "cmd cp deps/phoenix/priv/static/phoenix.min.js priv/static/assets/js/phoenix.min.js",
         "cmd cp deps/phoenix_live_view/priv/static/phoenix_live_view.min.js priv/static/assets/js/phoenix_live_view.min.js",
         "tailwind cae"
       ],
       "assets.deploy": [
+        "cmd cp assets/js/app.js priv/static/assets/js/app.js",
+        "cmd cp assets/js/hooks.js priv/static/assets/js/hooks.js",
         "cmd --cd assets cp node_modules/flyonui/flyonui.js ../priv/static/assets/js/flyonui.js",
         "cmd cp deps/phoenix/priv/static/phoenix.min.js priv/static/assets/js/phoenix.min.js",
         "cmd cp deps/phoenix_live_view/priv/static/phoenix_live_view.min.js priv/static/assets/js/phoenix_live_view.min.js",

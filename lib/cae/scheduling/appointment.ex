@@ -14,7 +14,7 @@ defmodule Cae.Scheduling.Appointment do
     timestamps(type: :utc_datetime)
   end
 
-  @statuses ["available", "booked", "blocked", "cancelled"]
+  @statuses ["available", "booked", "cancelled"]
 
   @doc """
   Changeset for creating or updating an appointment.
@@ -47,15 +47,6 @@ defmodule Cae.Scheduling.Appointment do
     appointment
     |> change()
     |> put_change(:status, "cancelled")
-  end
-
-  @doc """
-  Changeset for blocking time (admin/professional only).
-  """
-  def block_changeset(appointment, _attrs) do
-    appointment
-    |> change()
-    |> put_change(:status, "blocked")
   end
 
   defp validate_times(changeset) do

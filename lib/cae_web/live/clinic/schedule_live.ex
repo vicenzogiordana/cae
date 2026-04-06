@@ -7,9 +7,9 @@ defmodule CaeWeb.Clinic.ScheduleLive do
 
   @recurrence_options [
     {"Solo por hoy", "none"},
-    {"Repeat every week on this day", "weekly"},
-    {"Repeat for a month", "monthly"},
-    {"Repeat for a semester", "semester"}
+    {"Mismo horario por las proximas 2 semanas", "weekly"},
+    {"Mismo horario por el resto del mes", "monthly"},
+    {"Mismo horario por el resto del cuatrimestre", "semester"}
   ]
 
   @impl true
@@ -26,10 +26,23 @@ defmodule CaeWeb.Clinic.ScheduleLive do
      |> assign(:calendar_events, build_calendar_events(appointments))
      |> assign(:recurrence_options, @recurrence_options)
      |> assign(:show_modal, false)
+     |> assign(:show_appointment_details_modal, false)
      |> assign(:start_date, nil)
      |> assign(:end_date, nil)
      |> assign(:availability_modal_title, "Crear disponibilidad")
+     |> assign(:selected_appointment, %{})
      |> assign(:form, availability_form())}
+  end
+
+  @impl true
+  def handle_event("create_availability", %{"availability" => _params}, socket)
+      when is_nil(socket.assigns.professional) do
+    {:noreply,
+     put_flash(
+       socket,
+       :error,
+       "No hay profesionales disponibles para guardar disponibilidad."
+     )}
   end
 
   @impl true
@@ -55,9 +68,6 @@ defmodule CaeWeb.Clinic.ScheduleLive do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign(socket, :form, to_form(changeset, as: :availability))}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, format_error(reason))}
     end
   end
 
@@ -72,6 +82,13 @@ defmodule CaeWeb.Clinic.ScheduleLive do
      |> assign(:end_date, end_at)
      |> assign(:availability_modal_title, title)
      |> assign(:show_modal, true)}
+  end
+
+  @impl true
+  def handle_event("open_availability_modal", _params, socket)
+      when is_nil(socket.assigns.professional) do
+    {:noreply,
+     put_flash(socket, :error, "No hay profesionales disponibles para crear disponibilidad.")}
   end
 
   @impl true
@@ -97,6 +114,92 @@ defmodule CaeWeb.Clinic.ScheduleLive do
   end
 
   @impl true
+  def handle_event("delete_availability", _params, socket)
+      when is_nil(socket.assigns.professional) do
+    {:noreply,
+     put_flash(socket, :error, "No hay profesionales disponibles para borrar disponibilidad.")}
+  end
+
+  @impl true
+  def handle_event("delete_availability", %{"id" => id}, socket) do
+    professional = socket.assigns.professional
+
+    with {:ok, appointment_id} <- parse_appointment_id(id),
+         appointment when not is_nil(appointment) <- Scheduling.get_appointment(appointment_id),
+         true <- appointment.professional_id == professional.id,
+         true <- appointment.status == "available",
+         {:ok, _deleted} <- Scheduling.delete_appointment(appointment) do
+      appointments = load_appointments(professional)
+      events = build_calendar_events(appointments)
+
+      {:noreply,
+       socket
+       |> assign(:appointments, appointments)
+       |> assign(:calendar_events, events)
+       |> push_event("update_events", %{events: events})
+       |> put_flash(:info, "Disponibilidad borrada con exito.")}
+    else
+      {:error, :invalid_id} ->
+        {:noreply, put_flash(socket, :error, "No se pudo identificar la disponibilidad.")}
+
+      nil ->
+        {:noreply, put_flash(socket, :error, "La disponibilidad no existe.")}
+
+      false ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Solo se pueden borrar bloques disponibles del profesional actual."
+         )}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "No se pudo borrar la disponibilidad.")}
+    end
+  end
+
+  @impl true
+  def handle_event("open_event_details", %{"id" => _id}, socket)
+      when is_nil(socket.assigns.professional) do
+    {:noreply, put_flash(socket, :error, "No hay profesionales disponibles para ver el turno.")}
+  end
+
+  @impl true
+  def handle_event("open_event_details", %{"id" => id}, socket) do
+    professional = socket.assigns.professional
+
+    with {:ok, appointment_id} <- parse_appointment_id(id),
+         appointment when not is_nil(appointment) <- Scheduling.get_appointment(appointment_id),
+         true <- appointment.professional_id == professional.id,
+         true <- appointment.status == "booked" do
+      {:noreply,
+       socket
+       |> assign(:selected_appointment, appointment_details(appointment))
+       |> assign(:show_appointment_details_modal, true)}
+    else
+      {:error, :invalid_id} ->
+        {:noreply, put_flash(socket, :error, "No se pudo identificar el turno.")}
+
+      nil ->
+        {:noreply, put_flash(socket, :error, "El turno no existe.")}
+
+      false ->
+        {:noreply, put_flash(socket, :error, "Solo podés ver turnos del profesional actual.")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "No se pudo abrir el turno.")}
+    end
+  end
+
+  @impl true
+  def handle_event("close_appointment_details_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_appointment_details_modal, false)
+     |> assign(:selected_appointment, %{})}
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
@@ -106,6 +209,9 @@ defmodule CaeWeb.Clinic.ScheduleLive do
             <h2 class="text-2xl font-bold">Availability & Appointment Manager</h2>
             <p class="text-sm text-base-content/70">
               Mes por defecto, drill-down a dia y alta de disponibilidad recurrente.
+            </p>
+            <p class="text-xs text-base-content/60">
+              En vista dia puedes hacer click sobre un bloque disponible para borrarlo.
             </p>
           </div>
 
@@ -119,13 +225,84 @@ defmodule CaeWeb.Clinic.ScheduleLive do
         </div>
 
         <div class="card flex not-prose w-full p-4 shadow-sm">
-          <div id="calendar-custom-wrapper" phx-update="ignore" class="w-full">
-            <div
-              id="calendar-custom"
-              phx-hook="AvailabilityManager"
-              data-events={Jason.encode!(@calendar_events)}
-              class="min-h-[38rem] w-full"
-            >
+          <div id="calendar-custom-wrapper" class="w-full">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 w-full mb-3">
+              <div class="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  class="btn btn-soft btn-circle"
+                  id="calendar-nav-prev"
+                  aria-label="Anterior"
+                >
+                  <.icon name="hero-chevron-left" class="size-5" />
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-soft btn-circle"
+                  id="calendar-nav-next"
+                  aria-label="Siguiente"
+                >
+                  <.icon name="hero-chevron-right" class="size-5" />
+                </button>
+                <h3 id="calendar-title" class="text-3xl font-bold leading-tight">Agenda</h3>
+              </div>
+
+              <div class="w-full sm:w-auto">
+                <div class="hidden sm:inline-flex join">
+                  <button
+                    type="button"
+                    class="btn btn-soft join-item"
+                    data-calendar-view="dayGridMonth"
+                  >
+                    Mes
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-soft join-item"
+                    data-calendar-view="timeGridWeek"
+                  >
+                    Semana
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-soft join-item"
+                    data-calendar-view="timeGridDay"
+                  >
+                    Día
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-soft join-item"
+                    data-calendar-view="listMonth"
+                  >
+                    Lista
+                  </button>
+                </div>
+
+                <select
+                  id="calendar-view-select"
+                  class="block sm:hidden select select-bordered w-full"
+                  aria-label="Cambiar vista"
+                >
+                  <option value="dayGridMonth">Mes</option>
+                  <option value="timeGridWeek">Semana</option>
+                  <option value="timeGridDay">Día</option>
+                  <option value="listMonth">Lista</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="w-full overflow-x-auto pb-4">
+              <div class="min-w-[800px]">
+                <div
+                  id="calendar-custom"
+                  phx-hook="AvailabilityManager"
+                  phx-update="ignore"
+                  data-events={Jason.encode!(@calendar_events)}
+                  class="min-h-[38rem] w-full"
+                >
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -223,8 +400,14 @@ defmodule CaeWeb.Clinic.ScheduleLive do
               required
             />
 
-            <.input field={@form[:weekday]} type="hidden" id="availability_weekday" />
-            <.input field={@form[:availability_date]} type="hidden" id="availability_date" />
+            <.input
+              field={@form[:availability_date]}
+              id="availabilityDate"
+              type="date"
+              label="Día"
+              required
+              min={Date.to_iso8601(Date.utc_today())}
+            />
 
             <div class="flex justify-end gap-3 pt-2">
               <button type="button" class="btn btn-soft" phx-click="close_modal">Cancelar</button>
@@ -233,13 +416,74 @@ defmodule CaeWeb.Clinic.ScheduleLive do
           </.form>
         </div>
       </.modal>
+
+      <.modal
+        :if={@show_appointment_details_modal}
+        id="appointment-details-modal"
+        show
+        on_cancel={JS.push("close_appointment_details_modal")}
+      >
+        <div class="space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h3 class="text-xl font-bold">Detalle del turno</h3>
+              <p class="text-sm text-base-content/70">
+                Información del alumno y el horario reservado.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              phx-click="close_appointment_details_modal"
+              aria-label="Cerrar"
+            >
+              <.icon name="hero-x-mark" class="size-5" />
+            </button>
+          </div>
+
+          <div class="space-y-4 rounded-box border border-base-content/10 bg-base-100 p-4">
+            <div class="grid gap-4 md:grid-cols-2">
+              <div>
+                <p class="text-xs uppercase tracking-wide text-base-content/50">Alumno</p>
+                <p class="font-semibold">
+                  {Map.get(@selected_appointment, :student_name) || "Sin alumno asignado"}
+                </p>
+              </div>
+
+              <div>
+                <p class="text-xs uppercase tracking-wide text-base-content/50">Estado</p>
+                <p class="font-semibold text-primary">
+                  {Map.get(@selected_appointment, :status_label) || "Turno"}
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <p class="text-xs uppercase tracking-wide text-base-content/50">Profesional</p>
+              <p class="font-medium">{Map.get(@selected_appointment, :professional_name)}</p>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+              <div>
+                <p class="text-xs uppercase tracking-wide text-base-content/50">Inicio</p>
+                <p class="font-medium">{Map.get(@selected_appointment, :start_label)}</p>
+              </div>
+
+              <div>
+                <p class="text-xs uppercase tracking-wide text-base-content/50">Fin</p>
+                <p class="font-medium">{Map.get(@selected_appointment, :end_label)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </.modal>
     </Layouts.app>
     """
   end
 
   defp availability_form(attrs \\ %{}) do
     base = %{
-      "weekday" => "1",
       "availability_date" => Date.to_iso8601(Date.utc_today()),
       "start_time" => "08:00",
       "end_time" => "12:00",
@@ -253,38 +497,36 @@ defmodule CaeWeb.Clinic.ScheduleLive do
   end
 
   defp availability_form_for_slot(start_iso, end_iso) do
-    start_dt = parse_slot_datetime(start_iso) || DateTime.utc_now()
-    end_dt = parse_slot_datetime(end_iso) || DateTime.add(start_dt, 3600, :second)
-
-    end_dt =
-      if DateTime.compare(end_dt, start_dt) == :gt do
-        end_dt
-      else
-        DateTime.add(start_dt, 3600, :second)
-      end
+    today = Date.utc_today() |> Date.to_iso8601()
+    {:ok, start_date, start_time} = parse_slot_local(start_iso, today, "08:00")
+    {:ok, _end_date, end_time} = parse_slot_local(end_iso, start_date, "09:00")
 
     form =
       availability_form(%{
-        "weekday" => start_dt |> DateTime.to_date() |> Date.day_of_week() |> Integer.to_string(),
-        "availability_date" => start_dt |> DateTime.to_date() |> Date.to_iso8601(),
-        "start_time" => Calendar.strftime(start_dt, "%H:%M"),
-        "end_time" => Calendar.strftime(end_dt, "%H:%M")
+        "availability_date" => start_date,
+        "start_time" => start_time,
+        "end_time" => end_time
       })
 
-    title = "Crear disponibilidad - #{Calendar.strftime(start_dt, "%d/%m/%Y")}"
+    title =
+      case Date.from_iso8601(start_date) do
+        {:ok, date} -> "Crear disponibilidad - #{Calendar.strftime(date, "%d/%m/%Y")}"
+        _ -> "Crear disponibilidad"
+      end
+
     {form, title}
   end
 
-  defp parse_slot_datetime(nil), do: nil
-
-  defp parse_slot_datetime(value) when is_binary(value) do
-    case DateTime.from_iso8601(value) do
-      {:ok, dt, _offset} -> dt
-      _ -> nil
+  defp parse_slot_local(value, fallback_date, fallback_time) when is_binary(value) do
+    case Regex.run(~r/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/, value) do
+      [_, date, time] -> {:ok, date, time}
+      _ -> {:ok, fallback_date, fallback_time}
     end
   end
 
-  defp current_professional(nil), do: Accounts.list_users_by_role("psychologist") |> List.first()
+  defp parse_slot_local(_, fallback_date, fallback_time), do: {:ok, fallback_date, fallback_time}
+
+  defp current_professional(nil), do: first_available_professional()
 
   defp current_professional(current_scope) do
     user =
@@ -296,8 +538,16 @@ defmodule CaeWeb.Clinic.ScheduleLive do
     cond do
       is_map(user) and is_integer(Map.get(user, :id)) -> Accounts.get_user!(Map.get(user, :id))
       is_map(user) and is_integer(Map.get(user, "id")) -> Accounts.get_user!(Map.get(user, "id"))
-      true -> Accounts.list_users_by_role("psychologist") |> List.first()
+      true -> first_available_professional()
     end
+  end
+
+  defp first_available_professional do
+    ["psychologist", "psychiatrist", "psychopedagogue"]
+    |> Enum.find_value(fn role ->
+      Accounts.list_users_by_role(role)
+      |> List.first()
+    end)
   end
 
   defp load_appointments(nil), do: []
@@ -313,21 +563,63 @@ defmodule CaeWeb.Clinic.ScheduleLive do
       %{
         id: appointment.id,
         title: event_title(appointment),
-        start: DateTime.to_iso8601(appointment.start_at),
-        end: DateTime.to_iso8601(appointment.end_at),
+        start: appointment.start_at |> DateTime.to_naive() |> NaiveDateTime.to_iso8601(),
+        end: appointment.end_at |> DateTime.to_naive() |> NaiveDateTime.to_iso8601(),
         classNames: [event_class(appointment.status)],
-        extendedProps: %{status: appointment.status}
+        extendedProps: %{
+          status: appointment.status,
+          student_name: booked_student_name(appointment),
+          booked_by_name: booked_by_name(appointment)
+        }
       }
     end)
   end
 
   defp event_title(%{status: "available"}), do: "Available Block"
 
-  defp event_title(%{status: "booked", student: %{first_name: first, last_name: last}}),
-    do: "Booked - #{first} #{last}"
+  defp event_title(%{status: "booked"}), do: "Turno ocupado"
 
-  defp event_title(%{status: "booked"}), do: "Booked Appointment"
   defp event_title(_), do: "Appointment"
+
+  defp booked_student_name(%{status: "booked", student: %{first_name: first, last_name: last}}),
+    do: Enum.join([first, last], " ")
+
+  defp booked_student_name(_), do: nil
+
+  defp booked_by_name(%{status: "booked", booked_by: %{first_name: first, last_name: last}}),
+    do: Enum.join([first, last], " ")
+
+  defp booked_by_name(_), do: nil
+
+  defp appointment_details(appointment) do
+    %{
+      id: appointment.id,
+      status: appointment.status,
+      status_label: appointment_status_label(appointment.status),
+      professional_name: professional_name(appointment.professional),
+      student_name: booked_student_name(appointment),
+      booked_by_name: booked_by_name(appointment),
+      start_label: format_appointment_datetime(appointment.start_at),
+      end_label: format_appointment_datetime(appointment.end_at)
+    }
+  end
+
+  defp appointment_status_label("available"), do: "Disponible"
+  defp appointment_status_label("booked"), do: "Turno ocupado"
+  defp appointment_status_label("cancelled"), do: "Cancelado"
+  defp appointment_status_label("blocked"), do: "Bloqueado"
+  defp appointment_status_label(_), do: "Turno"
+
+  defp professional_name(%{first_name: first, last_name: last}), do: Enum.join([first, last], " ")
+  defp professional_name(_), do: "Sin profesional"
+
+  defp format_appointment_datetime(%DateTime{} = datetime) do
+    datetime
+    |> DateTime.to_naive()
+    |> Calendar.strftime("%d/%m/%Y %H:%M")
+  end
+
+  defp format_appointment_datetime(_), do: "Sin fecha"
 
   defp event_class("available"), do: "fc-event-success"
   defp event_class("booked"), do: "fc-event-primary"
@@ -335,16 +627,14 @@ defmodule CaeWeb.Clinic.ScheduleLive do
   defp event_class("cancelled"), do: "fc-event-error"
   defp event_class(_), do: "fc-event-info"
 
-  defp format_error(:professional_not_found), do: "Profesional no encontrado"
-  defp format_error(:not_professional), do: "El usuario no es un profesional valido"
-  defp format_error(:invalid_weekday), do: "Dia de semana invalido"
-  defp format_error(:invalid_duration), do: "Duracion invalida"
-  defp format_error(:invalid_gap), do: "Gap invalido"
-  defp format_error(:invalid_repeat_weeks), do: "Recurrencia invalida"
-  defp format_error(:invalid_time), do: "Formato de hora invalido"
+  defp parse_appointment_id(value) when is_integer(value), do: {:ok, value}
 
-  defp format_error(:invalid_time_range),
-    do: "La hora de fin debe ser posterior a la hora de inicio"
+  defp parse_appointment_id(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {id, ""} when id > 0 -> {:ok, id}
+      _ -> {:error, :invalid_id}
+    end
+  end
 
-  defp format_error(_), do: "No se pudo crear la disponibilidad"
+  defp parse_appointment_id(_), do: {:error, :invalid_id}
 end

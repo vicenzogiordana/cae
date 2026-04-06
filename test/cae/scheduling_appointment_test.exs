@@ -65,19 +65,6 @@ defmodule Cae.SchedulingAppointmentTest do
     assert cancelled.status == "cancelled"
   end
 
-  test "block_appointment/1 blocks a time slot", %{prof: prof} do
-    {:ok, slot} =
-      Scheduling.create_appointment_slot(
-        prof.id,
-        ~U[2026-04-10 13:00:00Z],
-        ~U[2026-04-10 13:30:00Z]
-      )
-
-    {:ok, blocked} = Scheduling.block_appointment(slot.id)
-
-    assert blocked.status == "blocked"
-  end
-
   test "list_student_appointments/1 lists student bookings", %{prof: prof, student: student} do
     {:ok, slot} =
       Scheduling.create_appointment_slot(
@@ -132,7 +119,7 @@ defmodule Cae.SchedulingAppointmentTest do
     assert count > 0
   end
 
-  test "create_recurring_availability/7 generates blocks with gap", %{prof: prof} do
+  test "create_recurring_availability/7 generates blocks with gap for three weeks", %{prof: prof} do
     weekday = Date.day_of_week(Date.utc_today()) |> Integer.to_string()
 
     {:ok, inserted} =
@@ -146,10 +133,10 @@ defmodule Cae.SchedulingAppointmentTest do
         "weekly"
       )
 
-    assert inserted == 3
+    assert inserted == 9
 
     appointments = Scheduling.list_professional_appointments(prof.id)
-    assert length(appointments) == 3
+    assert length(appointments) == 9
     assert Enum.all?(appointments, &(&1.status == "available"))
   end
 

@@ -12,6 +12,11 @@
   window.CaeHooks.AvailabilityManager = {
     mounted() {
       this.calendar = null
+      this.prevBtn = document.getElementById("calendar-nav-prev")
+      this.nextBtn = document.getElementById("calendar-nav-next")
+      this.titleEl = document.getElementById("calendar-title")
+      this.viewSelect = document.getElementById("calendar-view-select")
+      this.viewButtons = Array.from(document.querySelectorAll("[data-calendar-view]"))
 
       this.handleEvent("update_events", ({ events }) => {
         if (this.calendar) {
@@ -39,22 +44,32 @@
         initialView: "dayGridMonth",
         locale: "es",
         selectable: true,
+        editable: false,
+        dragScroll: true,
         unselectAuto: false,
         selectMirror: true,
         nowIndicator: true,
-        dayMaxEvents: true,
+        dayMaxEvents: 2,
         eventDisplay: "block",
+        displayEventEnd: true,
+        eventMinHeight: 34,
+        eventShortHeight: 26,
+        expandRows: true,
+        slotEventOverlap: false,
+        allDaySlot: true,
+        allDayText: "Todo el dia",
+        slotDuration: "00:30:00",
+        slotLabelInterval: "01:00",
         slotMinTime: "07:00:00",
         slotMaxTime: "22:00:00",
-        headerToolbar: {
-          left: "prev,next today",
-          center: "title",
-          right: "dayGridMonth,timeGridDay"
+        headerToolbar: false,
+        views: {
+          timeGridDay: {
+            dayMaxEvents: false
+          }
         },
-        buttonText: {
-          today: "Hoy",
-          month: "Mes",
-          day: "Dia"
+        datesSet: (info) => {
+          this.syncExternalHeader(info)
         },
         events: safeParseEvents(this.el.dataset.events),
         dateClick: (info) => {
@@ -80,14 +95,47 @@
         },
         eventClick: (info) => {
           info.jsEvent.preventDefault()
+
+          const status = info.event.extendedProps.status
+          const eventId = info.event.id
+
+          if (info.view.type === "timeGridDay" && status === "available" && eventId) {
+            const ok = window.confirm("Deseas borrar esta disponibilidad?")
+            if (ok) {
+              this.pushEvent("delete_availability", { id: String(eventId) })
+            }
+            return
+          }
+
+          if (status === "booked" && eventId) {
+            this.pushEvent("open_event_details", { id: String(eventId) })
+            return
+          }
+
           this.calendar.changeView("timeGridDay", info.event.start)
         },
         eventClassNames: (arg) => {
           const status = arg.event.extendedProps.status
           if (status === "booked") return ["fc-event-primary"]
           if (status === "available") return ["fc-event-success"]
-          if (status === "blocked") return ["fc-event-warning"]
           return []
+        },
+        eventContent: (arg) => {
+          const status = arg.event.extendedProps.status
+          const studentName = arg.event.extendedProps.student_name
+
+          if (status === "booked") {
+            return {
+              html: `
+                <div class="flex flex-col gap-0.5 text-[11px] leading-tight">
+                  <div class="truncate font-semibold">${studentName || "Turno ocupado"}</div>
+                  <div class="truncate opacity-90">${arg.timeText || "Turno ocupado"}</div>
+                </div>
+              `
+            }
+          }
+
+          return { html: `<div class="text-xs font-medium">${arg.event.title}</div>` }
         },
         eventTimeFormat: {
           hour: "2-digit",
@@ -97,6 +145,54 @@
       })
 
       this.calendar.render()
+      this.bindExternalControls()
+      this.syncExternalHeader({ view: this.calendar.view })
+    },
+
+    bindExternalControls() {
+      if (this.prevBtn) {
+        this.prevBtn.onclick = () => this.calendar.prev()
+      }
+
+      if (this.nextBtn) {
+        this.nextBtn.onclick = () => this.calendar.next()
+      }
+
+      this.viewButtons.forEach((button) => {
+        button.onclick = () => {
+          const view = button.dataset.calendarView
+          if (view) this.calendar.changeView(view)
+        }
+      })
+
+      if (this.viewSelect) {
+        this.viewSelect.onchange = (event) => {
+          const view = event.target.value
+          if (view) this.calendar.changeView(view)
+        }
+      }
+    },
+
+    syncExternalHeader(info) {
+      const viewType = info?.view?.type || "dayGridMonth"
+      const title = info?.view?.title || "Agenda"
+
+      if (this.titleEl) {
+        this.titleEl.textContent = title
+      }
+
+      this.viewButtons.forEach((button) => {
+        const active = button.dataset.calendarView === viewType
+        button.classList.toggle("btn-primary", active)
+        button.classList.toggle("btn-soft", !active)
+      })
+
+      if (
+        this.viewSelect &&
+        ["dayGridMonth", "timeGridWeek", "timeGridDay", "listMonth"].includes(viewType)
+      ) {
+        this.viewSelect.value = viewType
+      }
     },
 
     destroyed() {

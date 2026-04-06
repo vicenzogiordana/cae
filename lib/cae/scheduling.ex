@@ -3,7 +3,7 @@ defmodule Cae.Scheduling do
   The Scheduling context manages appointments and availability for professionals.
 
   This context handles:
-  - Creating and managing appointment slots (available, booked, blocked, cancelled)
+  - Creating and managing appointment slots (available, booked, cancelled)
   - Bulk generation of availability for professionals
   - Booking appointments by students or secretaries
   - Cancelling appointments
@@ -272,19 +272,6 @@ defmodule Cae.Scheduling do
   end
 
   @doc """
-  Blocks a time slot (professional or admin only).
-
-  Used to mark time as unavailable for personal reasons.
-  """
-  def block_appointment(appointment_id) do
-    appointment = get_appointment!(appointment_id)
-
-    appointment
-    |> Appointment.block_changeset(%{status: "blocked"})
-    |> Repo.update()
-  end
-
-  @doc """
   Checks if a professional has availability in a given time range.
   """
   def has_availability?(professional_id, start_at, end_at) do
@@ -325,7 +312,7 @@ defmodule Cae.Scheduling do
   end
 
   @doc """
-  Deletes an appointment (useful for removing blocked or cancelled slots).
+  Deletes an appointment.
   """
   def delete_appointment(%Appointment{} = appointment) do
     Repo.delete(appointment)
@@ -356,22 +343,20 @@ defmodule Cae.Scheduling do
          {:ok, anchor_date} <- parse_date(availability_date),
          {:ok, duration_int} <- parse_positive_int(duration_minutes),
          {:ok, gap_int} <- parse_non_negative_int(gap_minutes),
-         {:ok, repeat_weeks_int} <- repeat_weeks_for(recurrence),
+         {:ok, recurrence_dates} <- recurrence_dates_for(anchor_date, weekday_int, recurrence),
          {:ok, start_time_struct} <- parse_time(start_time),
          {:ok, end_time_struct} <- parse_time(end_time),
          :ok <- validate_time_range(start_time_struct, end_time_struct) do
       now = DateTime.utc_now() |> DateTime.truncate(:second)
 
       entries =
-        build_recurring_entries(
+        build_entries_for_dates(
           professional.id,
-          anchor_date,
-          weekday_int,
+          recurrence_dates,
           start_time_struct,
           end_time_struct,
           duration_int,
           gap_int,
-          repeat_weeks_int,
           now
         )
 
@@ -417,10 +402,13 @@ defmodule Cae.Scheduling do
       Map.get(params, "recurrence", "none")
       |> to_string()
 
+    weekday =
+      weekday_from_date(Map.get(params, "availability_date")) || Map.get(params, "weekday")
+
     with {:ok, duration_minutes} <- duration_minutes_from_range(params) do
       case create_recurring_availability(
              professional_id,
-             Map.get(params, "weekday"),
+             weekday,
              Map.get(params, "availability_date"),
              Map.get(params, "start_time"),
              Map.get(params, "end_time"),
@@ -556,17 +544,26 @@ defmodule Cae.Scheduling do
 
   defp parse_non_negative_int(_), do: {:error, :invalid_gap}
 
-  defp repeat_weeks_for("weekly"), do: {:ok, 1}
-  defp repeat_weeks_for("none"), do: {:ok, 1}
-  defp repeat_weeks_for("never"), do: {:ok, 1}
-  defp repeat_weeks_for("monthly"), do: {:ok, 4}
-  defp repeat_weeks_for("semester"), do: {:ok, 16}
+  defp recurrence_dates_for(anchor_date, weekday, recurrence) when is_binary(recurrence) do
+    first_date = next_weekday_on_or_after(anchor_date, weekday)
 
-  defp repeat_weeks_for(value) when is_binary(value) do
-    parse_positive_int(value)
+    case recurrence do
+      "none" -> {:ok, [first_date]}
+      "never" -> {:ok, [first_date]}
+      "weekly" -> {:ok, weekly_dates(first_date, 3)}
+      "monthly" -> {:ok, weekly_dates_until(first_date, end_of_month(anchor_date))}
+      "semester" -> {:ok, weekly_dates_until(first_date, end_of_semester(anchor_date))}
+      _ -> {:error, :invalid_repeat_weeks}
+    end
   end
 
-  defp repeat_weeks_for(_), do: {:error, :invalid_repeat_weeks}
+  defp recurrence_dates_for(anchor_date, weekday, value) do
+    first_date = next_weekday_on_or_after(anchor_date, weekday)
+
+    with {:ok, repeat_weeks} <- parse_positive_int(value) do
+      {:ok, weekly_dates(first_date, repeat_weeks)}
+    end
+  end
 
   defp parse_time(value) when is_binary(value) do
     normalized = if String.length(value) == 5, do: value <> ":00", else: value
@@ -639,6 +636,15 @@ defmodule Cae.Scheduling do
     end
   end
 
+  defp weekday_from_date(value) when is_binary(value) do
+    case Date.from_iso8601(value) do
+      {:ok, date} -> Integer.to_string(Date.day_of_week(date))
+      _ -> nil
+    end
+  end
+
+  defp weekday_from_date(_), do: nil
+
   defp parse_date(value) when is_binary(value) do
     case Date.from_iso8601(value) do
       {:ok, date} -> {:ok, date}
@@ -656,23 +662,17 @@ defmodule Cae.Scheduling do
     end
   end
 
-  defp build_recurring_entries(
+  defp build_entries_for_dates(
          professional_id,
-         from_date,
-         weekday,
+         recurrence_dates,
          start_time,
          end_time,
          duration_minutes,
          gap_minutes,
-         repeat_weeks,
          now
        ) do
-    first_date = next_weekday_on_or_after(from_date, weekday)
-
-    0..(repeat_weeks - 1)
-    |> Enum.flat_map(fn week_offset ->
-      date = Date.add(first_date, week_offset * 7)
-
+    recurrence_dates
+    |> Enum.flat_map(fn date ->
       build_day_entries(
         date,
         professional_id,
@@ -683,6 +683,35 @@ defmodule Cae.Scheduling do
         now
       )
     end)
+  end
+
+  defp weekly_dates(first_date, repeat_weeks) do
+    0..(repeat_weeks - 1)
+    |> Enum.map(fn week_offset -> Date.add(first_date, week_offset * 7) end)
+  end
+
+  defp weekly_dates_until(first_date, end_date) do
+    Stream.iterate(first_date, &Date.add(&1, 7))
+    |> Enum.take_while(&(Date.compare(&1, end_date) != :gt))
+  end
+
+  defp end_of_month(%Date{} = date) do
+    %Date{date | day: Date.days_in_month(date)}
+  end
+
+  defp end_of_semester(anchor_date) do
+    anchor_date
+    |> add_months(3)
+    |> end_of_month()
+  end
+
+  defp add_months(%Date{year: year, month: month} = date, months_to_add) do
+    total_months = year * 12 + month - 1 + months_to_add
+    new_year = div(total_months, 12)
+    new_month = rem(total_months, 12) + 1
+    day = min(date.day, Date.days_in_month(Date.new!(new_year, new_month, 1)))
+
+    Date.new!(new_year, new_month, day)
   end
 
   defp build_day_entries(

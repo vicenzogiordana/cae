@@ -27,6 +27,197 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+/* FullCalendar theme overrides aligned with FlyonUI tokens. */
+.fc {
+   --cae-grid-line: #98aab3;
+   --cae-grid-line-soft: #b8c6cc;
+   --cae-calendar-bg: #eef4f6;
+   --fc-border-color: var(--cae-grid-line);
+   --fc-page-bg-color: transparent;
+   --fc-neutral-bg-color: var(--cae-calendar-bg);
+   --fc-today-bg-color: rgb(14 165 233 / 0.08);
+   color: #2f4750;
+   font: inherit;
+}
+
+.fc .fc-toolbar {
+   gap: 0.75rem;
+   margin-bottom: 1rem;
+}
+
+.fc .fc-toolbar-title {
+   color: #2f4750;
+   font-size: 1.5rem;
+   font-weight: 800;
+   letter-spacing: -0.03em;
+}
+
+.fc .fc-button {
+   border: 1px solid var(--cae-grid-line-soft) !important;
+   border-radius: 9999px !important;
+   box-shadow: none !important;
+   font-weight: 700;
+   padding-inline: 0.9rem !important;
+}
+
+.fc .fc-button-primary,
+.fc .fc-button-primary:disabled {
+   background: #d7e8ee !important;
+   color: #2f4750 !important;
+}
+
+.fc .fc-button-primary:not(:disabled):hover,
+.fc .fc-button-primary:not(:disabled).fc-button-active,
+.fc .fc-button-primary:not(:disabled):active {
+   background: #b8dde8 !important;
+   border-color: transparent !important;
+   color: #0f4b5a !important;
+}
+
+.fc .fc-col-header-cell-cushion,
+.fc .fc-daygrid-day-number,
+.fc .fc-timegrid-axis-cushion,
+.fc .fc-timegrid-slot-label-cushion {
+   color: #2f4750;
+   font-weight: 600;
+   text-decoration: none;
+}
+
+.fc .fc-daygrid-day.fc-day-today {
+   background: rgb(14 165 233 / 0.08) !important;
+}
+
+.fc .fc-scrollgrid,
+.fc .fc-scrollgrid-section > td,
+.fc .fc-scrollgrid-section > th,
+.fc .fc-theme-standard td,
+.fc .fc-theme-standard th,
+.fc .fc-timegrid-slot,
+.fc .fc-daygrid-day-frame {
+   border-color: var(--cae-grid-line) !important;
+}
+
+.fc .fc-theme-standard td,
+.fc .fc-theme-standard th,
+.fc .fc-scrollgrid {
+   border-width: 1px !important;
+}
+
+.fc .fc-daygrid-day {
+   background: var(--cae-calendar-bg);
+}
+
+.fc .fc-col-header-cell {
+   background: #e4edf1;
+}
+
+.fc .fc-event {
+   --cae-event-bg: rgb(148 163 184 / 0.22);
+   --cae-event-border: rgb(100 116 139 / 0.45);
+   --cae-event-text: #1e293b;
+   border-width: 1px !important;
+   border-style: solid !important;
+   border-radius: 0.9rem !important;
+   box-shadow: 0 1px 1px rgb(15 23 42 / 0.06);
+   cursor: pointer;
+   opacity: 1 !important;
+   background-color: var(--cae-event-bg) !important;
+   border-color: var(--cae-event-border) !important;
+   color: var(--cae-event-text) !important;
+}
+
+.fc .fc-event.fc-event-primary,
+.fc .fc-event-primary {
+   --cae-event-bg: rgb(37 99 235 / 0.18);
+   --cae-event-border: rgb(37 99 235 / 0.42);
+   --cae-event-text: #1e3a8a;
+}
+
+.fc .fc-event.fc-event-success,
+.fc .fc-event-success {
+   --cae-event-bg: rgb(22 163 74 / 0.18);
+   --cae-event-border: rgb(22 163 74 / 0.42);
+   --cae-event-text: #166534;
+}
+
+.fc .fc-event.fc-event-warning,
+.fc .fc-event-warning {
+   --cae-event-bg: rgb(217 119 6 / 0.18);
+   --cae-event-border: rgb(217 119 6 / 0.42);
+   --cae-event-text: #92400e;
+}
+
+.fc .fc-event.fc-event-error,
+.fc .fc-event-error {
+   --cae-event-bg: rgb(220 38 38 / 0.18);
+   --cae-event-border: rgb(220 38 38 / 0.42);
+   --cae-event-text: #991b1b;
+}
+
+.fc .fc-event.fc-event-info,
+.fc .fc-event-info {
+   --cae-event-bg: rgb(14 165 233 / 0.18);
+   --cae-event-border: rgb(14 165 233 / 0.42);
+   --cae-event-text: #0c4a6e;
+}
+
+.fc .fc-event .fc-event-main,
+.fc .fc-h-event .fc-event-main,
+.fc .fc-v-event .fc-event-main,
+.fc .fc-timegrid-event .fc-event-main,
+.fc .fc-daygrid-event .fc-event-main {
+   background-color: transparent !important;
+   color: var(--cae-event-text) !important;
+   border-color: transparent !important;
+   opacity: 1 !important;
+}
+
+.fc .fc-timegrid-event .fc-event-main,
+.fc .fc-daygrid-event .fc-event-main {
+   padding: 0.25rem 0.4rem;
+}
+
+.fc .fc-timegrid-slot,
+.fc .fc-timegrid-slot-lane,
+.fc .fc-timegrid-slot-minor,
+.fc .fc-timegrid-slot-major {
+   border-style: solid !important;
+   border-width: 0.35px !important;
+}
+
+.fc .fc-timegrid-slot {
+   height: 2.6rem;
+}
+
+.fc .fc-timegrid-axis {
+   background: #e4edf1;
+}
+
+.fc .fc-timegrid-axis-cushion,
+.fc .fc-timegrid-slot-label-cushion {
+   font-size: 0.75rem;
+   font-weight: 700;
+   opacity: 0.8;
+}
+
+.fc .fc-timegrid-event {
+   min-height: 2rem;
+}
+
+.fc .fc-timegrid-event .fc-event-main {
+   border-left: 2px solid var(--cae-event-border);
+   border-radius: 0;
+   padding: 0.35rem 0.45rem;
+}
+
+.fc .fc-list {
+   border-color: var(--cae-grid-line);
+}
+
+.fc .fc-list-day-cushion {
+   background: #e4edf1;
+}
+
 /* This file is for your main application CSS */
 
 
