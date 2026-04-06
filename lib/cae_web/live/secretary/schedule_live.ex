@@ -10,6 +10,12 @@ defmodule CaeWeb.Secretary.ScheduleLive do
     {"Psicopedagogía", "psychopedagogy"}
   ]
 
+  @status_options [
+    {"Disponibles", "available"},
+    {"Reservados", "booked"},
+    {"Todos", "all"}
+  ]
+
   @profession_role_map %{
     "psychology" => "psychologist",
     "psychopedagogy" => "psychopedagogue"
@@ -18,9 +24,10 @@ defmodule CaeWeb.Secretary.ScheduleLive do
   @impl true
   def mount(_params, _session, socket) do
     selected_profession = ""
+    selected_status = "available"
     professionals = list_professionals(selected_profession)
     selected_professional_id = nil
-    appointments = load_available_appointments(selected_professional_id)
+    appointments = load_appointments(selected_professional_id, selected_status)
     events = build_calendar_events(appointments)
     students = list_students()
 
@@ -29,7 +36,9 @@ defmodule CaeWeb.Secretary.ScheduleLive do
      |> assign(:page_title, "Agenda General")
      |> assign(:current_scope, socket.assigns[:current_scope])
      |> assign(:profession_options, @profession_options)
+     |> assign(:status_options, @status_options)
      |> assign(:selected_profession, selected_profession)
+     |> assign(:selected_status, selected_status)
      |> assign(:professionals, professionals)
      |> assign(:selected_professional_id, selected_professional_id)
      |> assign(:appointments, appointments)
@@ -45,6 +54,7 @@ defmodule CaeWeb.Secretary.ScheduleLive do
   def handle_event("filters_changed", params, socket) when is_map(params) do
     profession = Map.get(params, "profession", "")
     professional_id = Map.get(params, "professional_id", "")
+    selected_status = normalize_status(Map.get(params, "status", "available"))
     professionals = list_professionals(profession)
 
     selected_professional_id =
@@ -52,12 +62,13 @@ defmodule CaeWeb.Secretary.ScheduleLive do
       |> normalize_professional_id(professionals)
       |> default_professional_id(professionals)
 
-    appointments = load_available_appointments(selected_professional_id)
+    appointments = load_appointments(selected_professional_id, selected_status)
     events = build_calendar_events(appointments)
 
     {:noreply,
      socket
      |> assign(:selected_profession, profession)
+     |> assign(:selected_status, selected_status)
      |> assign(:professionals, professionals)
      |> assign(:selected_professional_id, selected_professional_id)
      |> assign(:appointments, appointments)
@@ -85,7 +96,8 @@ defmodule CaeWeb.Secretary.ScheduleLive do
 
     with {:ok, appointment_id} <- parse_appointment_id(id),
          appointment when not is_nil(appointment) <-
-           Enum.find(appointments, &(&1.id == appointment_id)) do
+           Enum.find(appointments, &(&1.id == appointment_id)),
+         true <- appointment.status == "available" do
       slot = %{
         id: appointment.id,
         professional_name: professional_name(appointment),
@@ -100,6 +112,9 @@ defmodule CaeWeb.Secretary.ScheduleLive do
        |> assign(:filtered_students, socket.assigns.students)
        |> assign(:show_modal, true)}
     else
+      false ->
+        {:noreply, put_flash(socket, :info, "Ese turno ya esta reservado")}
+
       _ ->
         {:noreply, put_flash(socket, :error, "No se pudo seleccionar el turno")}
     end
@@ -120,13 +135,14 @@ defmodule CaeWeb.Secretary.ScheduleLive do
     selected_slot = socket.assigns.selected_slot
     appointment_id = selected_slot && selected_slot.id
     selected_professional_id = socket.assigns.selected_professional_id
+    selected_status = socket.assigns.selected_status
 
     with true <- is_integer(appointment_id),
          {:ok, parsed_student_id} <- parse_appointment_id(student_id),
          {:ok, secretary_id} <- current_secretary_id(socket.assigns.current_scope),
          {:ok, _appointment} <-
            Scheduling.book_appointment(appointment_id, parsed_student_id, secretary_id) do
-      appointments = load_available_appointments(selected_professional_id)
+      appointments = load_appointments(selected_professional_id, selected_status)
       events = build_calendar_events(appointments)
 
       {:noreply,
@@ -150,7 +166,7 @@ defmodule CaeWeb.Secretary.ScheduleLive do
         {:noreply, put_flash(socket, :error, "No se pudo identificar a la secretaria actual")}
 
       {:error, "El turno no está disponible"} ->
-        appointments = load_available_appointments(selected_professional_id)
+        appointments = load_appointments(selected_professional_id, selected_status)
         events = build_calendar_events(appointments)
 
         {:noreply,
@@ -179,12 +195,12 @@ defmodule CaeWeb.Secretary.ScheduleLive do
         <div>
           <h2 class="text-2xl font-bold">Agenda General de Secretaria</h2>
           <p class="text-sm text-base-content/70">
-            Asigná turnos disponibles por profesional a alumnos.
+            Consulta turnos y asigna bloques disponibles por profesional.
           </p>
         </div>
 
         <div class="rounded-box border border-base-content/10 bg-base-100 p-4">
-          <form phx-change="filters_changed" class="grid gap-3 md:grid-cols-2">
+          <form phx-change="filters_changed" class="grid gap-3 md:grid-cols-3">
             <label class="form-control w-full">
               <span class="label-text mb-2">Profesión</span>
               <select name="profession" class="select select-bordered w-full">
@@ -216,6 +232,19 @@ defmodule CaeWeb.Secretary.ScheduleLive do
                 </option>
               </select>
             </label>
+
+            <label class="form-control w-full">
+              <span class="label-text mb-2">Estado</span>
+              <select name="status" class="select select-bordered w-full">
+                <option
+                  :for={{label, value} <- @status_options}
+                  value={value}
+                  selected={@selected_status == value}
+                >
+                  {label}
+                </option>
+              </select>
+            </label>
           </form>
         </div>
 
@@ -235,7 +264,7 @@ defmodule CaeWeb.Secretary.ScheduleLive do
         </div>
 
         <div :if={Enum.empty?(@appointments)} class="alert alert-soft alert-info" role="alert">
-          <span>No hay turnos disponibles para el filtro seleccionado.</span>
+          <span>{empty_state_message(@selected_status)}</span>
         </div>
       </section>
 
@@ -330,30 +359,85 @@ defmodule CaeWeb.Secretary.ScheduleLive do
   defp default_professional_id(selected_professional_id, _professionals),
     do: selected_professional_id
 
-  defp load_available_appointments(nil), do: []
+  defp load_appointments(nil, _status), do: []
 
-  defp load_available_appointments(professional_id) when is_integer(professional_id) do
+  defp load_appointments(professional_id, status) when is_integer(professional_id) do
     start_date = Date.utc_today()
     end_date = Date.add(start_date, 120)
 
-    Scheduling.list_available_appointments(professional_id, start_date, end_date)
+    case status do
+      "available" ->
+        Scheduling.list_available_appointments(professional_id, start_date, end_date)
+
+      "booked" ->
+        professional_id
+        |> Scheduling.list_professional_appointments(start_date, end_date)
+        |> Enum.filter(&(&1.status == "booked"))
+
+      "all" ->
+        professional_id
+        |> Scheduling.list_professional_appointments(start_date, end_date)
+        |> Enum.filter(&(&1.status in ["available", "booked"]))
+
+      _ ->
+        Scheduling.list_available_appointments(professional_id, start_date, end_date)
+    end
   end
 
   defp build_calendar_events(appointments) do
     Enum.map(appointments, fn appointment ->
+      status = appointment.status || "available"
+
       %{
         id: appointment.id,
-        title: professional_name(appointment),
+        title: event_title(appointment),
         start: appointment.start_at |> DateTime.to_naive() |> NaiveDateTime.to_iso8601(),
         end: appointment.end_at |> DateTime.to_naive() |> NaiveDateTime.to_iso8601(),
-        classNames: ["fc-event-success"],
+        classNames: [event_class_name(status)],
         extendedProps: %{
-          status: "available",
-          professional_name: professional_name(appointment)
+          status: status,
+          professional_name: professional_name(appointment),
+          student_name: student_name(appointment)
         }
       }
     end)
   end
+
+  defp normalize_status("available"), do: "available"
+  defp normalize_status("booked"), do: "booked"
+  defp normalize_status("all"), do: "all"
+  defp normalize_status(_), do: "available"
+
+  defp event_class_name("available"), do: "fc-event-success"
+  defp event_class_name("booked"), do: "fc-event-primary"
+  defp event_class_name(_), do: "fc-event-info"
+
+  defp event_title(%{status: "booked"} = appointment) do
+    student_name(appointment)
+  end
+
+  defp event_title(appointment) do
+    professional_name(appointment)
+  end
+
+  defp student_name(%{student: student}) when is_map(student) do
+    cond do
+      is_binary(student.first_name) and is_binary(student.last_name) ->
+        "#{student.first_name} #{student.last_name}"
+
+      is_binary(student.email) ->
+        student.email
+
+      true ->
+        "Alumno"
+    end
+  end
+
+  defp student_name(_), do: "Alumno"
+
+  defp empty_state_message("booked"), do: "No hay turnos reservados para el filtro seleccionado."
+  defp empty_state_message("all"), do: "No hay turnos para el filtro seleccionado."
+  defp empty_state_message(_), do: "No hay turnos disponibles para el filtro seleccionado."
 
   defp list_students do
     Accounts.list_users_by_role("student")

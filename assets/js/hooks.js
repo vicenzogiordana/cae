@@ -279,6 +279,12 @@
         eventClick: (info) => {
           info.jsEvent.preventDefault()
 
+          const status = info.event.extendedProps.status
+
+          if (status !== "available") {
+            return
+          }
+
           this.pushEvent("select_appointment_slot", {
             id: String(info.event.id),
             start: info.event.startStr,
@@ -288,10 +294,24 @@
         eventClassNames: (arg) => {
           const status = arg.event.extendedProps.status
           if (status === "available") return ["fc-event-success"]
+          if (status === "booked") return ["fc-event-primary"]
           return ["fc-event-info"]
         },
         eventContent: (arg) => {
+          const status = arg.event.extendedProps.status
           const professionalName = arg.event.extendedProps.professional_name
+          const studentName = arg.event.extendedProps.student_name
+
+          if (status === "booked") {
+            return {
+              html: `
+                <div class="flex flex-col gap-0.5 text-[11px] leading-tight">
+                  <div class="truncate font-semibold">${studentName || "Turno reservado"}</div>
+                  <div class="truncate opacity-90">${professionalName || arg.timeText || "Reservado"}</div>
+                </div>
+              `
+            }
+          }
 
           return {
             html: `
