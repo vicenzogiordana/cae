@@ -51,6 +51,32 @@ defmodule Cae.SchedulingAppointmentTest do
     assert booked.student_id == student.id
   end
 
+  test "book_appointment/3 prevents more than one booking in the same week", %{
+    prof: prof,
+    student: student
+  } do
+    {:ok, first_slot} =
+      Scheduling.create_appointment_slot(
+        prof.id,
+        ~U[2026-04-10 09:00:00Z],
+        ~U[2026-04-10 09:30:00Z]
+      )
+
+    {:ok, second_slot} =
+      Scheduling.create_appointment_slot(
+        prof.id,
+        ~U[2026-04-11 10:00:00Z],
+        ~U[2026-04-11 10:30:00Z]
+      )
+
+    {:ok, booked} = Scheduling.book_appointment(first_slot.id, student.id, student.id)
+
+    assert booked.status == "booked"
+
+    assert {:error, "El alumno ya tiene un turno reservado esta semana"} ==
+             Scheduling.book_appointment(second_slot.id, student.id, student.id)
+  end
+
   test "cancel_appointment/1 cancels a booking", %{prof: prof, student: student} do
     {:ok, slot} =
       Scheduling.create_appointment_slot(
@@ -63,6 +89,68 @@ defmodule Cae.SchedulingAppointmentTest do
     {:ok, cancelled} = Scheduling.cancel_appointment(booked.id)
 
     assert cancelled.status == "cancelled"
+  end
+
+  test "cancel_student_appointment/2 frees the slot and records history", %{
+    prof: prof,
+    student: student
+  } do
+    {:ok, slot} =
+      Scheduling.create_appointment_slot(
+        prof.id,
+        ~U[2026-04-10 13:00:00Z],
+        ~U[2026-04-10 13:30:00Z]
+      )
+
+    {:ok, booked} = Scheduling.book_appointment(slot.id, student.id, student.id)
+
+    {:ok, cancelled} = Scheduling.cancel_student_appointment(student.id, booked.id)
+
+    assert cancelled.status == "available"
+    assert cancelled.student_id == nil
+    assert cancelled.booked_by_id == nil
+
+    refreshed = Scheduling.get_appointment!(booked.id)
+
+    assert refreshed.status == "available"
+    assert refreshed.student_id == nil
+
+    cancellations = Scheduling.list_student_cancellations(student.id)
+
+    assert length(cancellations) == 1
+    assert hd(cancellations).appointment_id == booked.id
+    assert hd(cancellations).professional_id == prof.id
+    assert hd(cancellations).student_id == student.id
+    assert hd(cancellations).cancelled_by_role == "student"
+
+    recently_released_ids = Scheduling.list_recently_released_appointment_ids(prof.id, 24)
+    assert booked.id in recently_released_ids
+  end
+
+  test "cancel_professional_appointment/2 keeps appointment cancelled and records source", %{
+    prof: prof,
+    student: student
+  } do
+    {:ok, slot} =
+      Scheduling.create_appointment_slot(
+        prof.id,
+        ~U[2026-04-10 16:00:00Z],
+        ~U[2026-04-10 16:30:00Z]
+      )
+
+    {:ok, booked} = Scheduling.book_appointment(slot.id, student.id, student.id)
+
+    {:ok, cancelled} = Scheduling.cancel_professional_appointment(prof.id, booked.id)
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.student_id == student.id
+
+    cancellations = Scheduling.list_student_cancellations(student.id)
+
+    assert Enum.any?(cancellations, fn cancellation ->
+             cancellation.appointment_id == booked.id and
+               cancellation.cancelled_by_role == "professional"
+           end)
   end
 
   test "list_student_appointments/1 lists student bookings", %{prof: prof, student: student} do

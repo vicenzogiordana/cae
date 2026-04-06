@@ -16,6 +16,7 @@ defmodule CaeWeb.Clinic.ScheduleLive do
   def mount(_params, _session, socket) do
     professional = current_professional(socket.assigns[:current_scope])
     appointments = load_appointments(professional)
+    recently_released_ids = recently_released_appointment_ids(professional)
 
     {:ok,
      socket
@@ -23,7 +24,8 @@ defmodule CaeWeb.Clinic.ScheduleLive do
      |> assign(:current_scope, socket.assigns[:current_scope])
      |> assign(:professional, professional)
      |> assign(:appointments, appointments)
-     |> assign(:calendar_events, build_calendar_events(appointments))
+     |> assign(:recently_released_ids, recently_released_ids)
+     |> assign(:calendar_events, build_calendar_events(appointments, recently_released_ids))
      |> assign(:recurrence_options, @recurrence_options)
      |> assign(:show_modal, false)
      |> assign(:show_appointment_details_modal, false)
@@ -52,11 +54,13 @@ defmodule CaeWeb.Clinic.ScheduleLive do
     case Scheduling.create_availability(professional.id, params) do
       {:ok, _availability} ->
         appointments = load_appointments(professional)
-        events = build_calendar_events(appointments)
+        recently_released_ids = recently_released_appointment_ids(professional)
+        events = build_calendar_events(appointments, recently_released_ids)
 
         {:noreply,
          socket
          |> assign(:appointments, appointments)
+         |> assign(:recently_released_ids, recently_released_ids)
          |> assign(:calendar_events, events)
          |> assign(:show_modal, false)
          |> assign(:start_date, nil)
@@ -130,11 +134,13 @@ defmodule CaeWeb.Clinic.ScheduleLive do
          true <- appointment.status == "available",
          {:ok, _deleted} <- Scheduling.delete_appointment(appointment) do
       appointments = load_appointments(professional)
-      events = build_calendar_events(appointments)
+      recently_released_ids = recently_released_appointment_ids(professional)
+      events = build_calendar_events(appointments, recently_released_ids)
 
       {:noreply,
        socket
        |> assign(:appointments, appointments)
+       |> assign(:recently_released_ids, recently_released_ids)
        |> assign(:calendar_events, events)
        |> push_event("update_events", %{events: events})
        |> put_flash(:info, "Disponibilidad borrada con exito.")}
@@ -197,6 +203,51 @@ defmodule CaeWeb.Clinic.ScheduleLive do
      socket
      |> assign(:show_appointment_details_modal, false)
      |> assign(:selected_appointment, %{})}
+  end
+
+  @impl true
+  def handle_event("cancel_professional_appointment", _params, socket)
+      when is_nil(socket.assigns.professional) do
+    {:noreply,
+     put_flash(socket, :error, "No hay profesionales disponibles para cancelar turnos.")}
+  end
+
+  @impl true
+  def handle_event("cancel_professional_appointment", %{"id" => id}, socket) do
+    professional = socket.assigns.professional
+
+    with {:ok, appointment_id} <- parse_appointment_id(id),
+         appointment when not is_nil(appointment) <- Scheduling.get_appointment(appointment_id),
+         true <- appointment.professional_id == professional.id,
+         true <- appointment.status == "booked",
+         {:ok, _cancelled} <-
+           Scheduling.cancel_professional_appointment(professional.id, appointment.id) do
+      appointments = load_appointments(professional)
+      recently_released_ids = recently_released_appointment_ids(professional)
+      events = build_calendar_events(appointments, recently_released_ids)
+
+      {:noreply,
+       socket
+       |> assign(:appointments, appointments)
+       |> assign(:recently_released_ids, recently_released_ids)
+       |> assign(:calendar_events, events)
+       |> assign(:show_appointment_details_modal, false)
+       |> assign(:selected_appointment, %{})
+       |> push_event("update_events", %{events: events})
+       |> put_flash(:info, "Consulta cancelada por el profesional")}
+    else
+      {:error, :invalid_id} ->
+        {:noreply, put_flash(socket, :error, "No se pudo identificar el turno")}
+
+      nil ->
+        {:noreply, put_flash(socket, :error, "El turno no existe")}
+
+      false ->
+        {:noreply, put_flash(socket, :error, "Solo podés cancelar turnos reservados propios")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "No se pudo cancelar la consulta")}
+    end
   end
 
   @impl true
@@ -475,6 +526,24 @@ defmodule CaeWeb.Clinic.ScheduleLive do
                 <p class="font-medium">{Map.get(@selected_appointment, :end_label)}</p>
               </div>
             </div>
+
+            <div class="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                class="btn btn-soft"
+                phx-click="close_appointment_details_modal"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                class="btn btn-warning"
+                phx-click="cancel_professional_appointment"
+                phx-value-id={Map.get(@selected_appointment, :id)}
+              >
+                Cancelar consulta
+              </button>
+            </div>
           </div>
         </div>
       </.modal>
@@ -558,16 +627,25 @@ defmodule CaeWeb.Clinic.ScheduleLive do
     Scheduling.list_professional_appointments(professional.id, start_date, end_date)
   end
 
-  defp build_calendar_events(appointments) do
+  defp recently_released_appointment_ids(nil), do: []
+
+  defp recently_released_appointment_ids(professional) do
+    Scheduling.list_recently_released_appointment_ids(professional.id, 24)
+  end
+
+  defp build_calendar_events(appointments, recently_released_ids) do
     Enum.map(appointments, fn appointment ->
+      released_recently? = released_recently?(appointment, recently_released_ids)
+
       %{
         id: appointment.id,
-        title: event_title(appointment),
+        title: event_title(appointment, released_recently?),
         start: appointment.start_at |> DateTime.to_naive() |> NaiveDateTime.to_iso8601(),
         end: appointment.end_at |> DateTime.to_naive() |> NaiveDateTime.to_iso8601(),
-        classNames: [event_class(appointment.status)],
+        classNames: [event_class(appointment.status, released_recently?)],
         extendedProps: %{
           status: appointment.status,
+          released_recently: released_recently?,
           student_name: booked_student_name(appointment),
           booked_by_name: booked_by_name(appointment)
         }
@@ -575,11 +653,21 @@ defmodule CaeWeb.Clinic.ScheduleLive do
     end)
   end
 
-  defp event_title(%{status: "available"}), do: "Available Block"
+  defp event_title(%{status: "available"}, true), do: "Disponible (reabierto)"
 
-  defp event_title(%{status: "booked"}), do: "Turno ocupado"
+  defp event_title(%{status: "available"}, false), do: "Available Block"
 
-  defp event_title(_), do: "Appointment"
+  defp event_title(%{status: "booked"}, _released_recently?), do: "Turno ocupado"
+
+  defp event_title(%{status: "cancelled"}, _released_recently?), do: "Consulta cancelada"
+
+  defp event_title(_appointment, _released_recently?), do: "Appointment"
+
+  defp released_recently?(%{status: "available", id: appointment_id}, recently_released_ids) do
+    appointment_id in recently_released_ids
+  end
+
+  defp released_recently?(_appointment, _recently_released_ids), do: false
 
   defp booked_student_name(%{status: "booked", student: %{first_name: first, last_name: last}}),
     do: Enum.join([first, last], " ")
@@ -621,11 +709,12 @@ defmodule CaeWeb.Clinic.ScheduleLive do
 
   defp format_appointment_datetime(_), do: "Sin fecha"
 
-  defp event_class("available"), do: "fc-event-success"
-  defp event_class("booked"), do: "fc-event-primary"
-  defp event_class("blocked"), do: "fc-event-warning"
-  defp event_class("cancelled"), do: "fc-event-error"
-  defp event_class(_), do: "fc-event-info"
+  defp event_class("available", true), do: "fc-event-warning"
+  defp event_class("available", false), do: "fc-event-success"
+  defp event_class("booked", _), do: "fc-event-primary"
+  defp event_class("blocked", _), do: "fc-event-warning"
+  defp event_class("cancelled", _), do: "fc-event-warning"
+  defp event_class(_, _), do: "fc-event-info"
 
   defp parse_appointment_id(value) when is_integer(value), do: {:ok, value}
 

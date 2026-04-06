@@ -14,6 +14,7 @@ defmodule Cae.Scheduling do
   import Ecto.Changeset, warn: false
   alias Cae.Repo
   alias Cae.Scheduling.Appointment
+  alias Cae.Scheduling.AppointmentCancellation
   alias Cae.Accounts
 
   @availability_types %{
@@ -174,7 +175,7 @@ defmodule Cae.Scheduling do
   def list_available_appointments(professional_id, start_date \\ nil, end_date \\ nil) do
     query =
       from(a in Appointment,
-        where: a.professional_id == ^professional_id and a.status == "available",
+        where: [professional_id: ^professional_id, status: "available"],
         preload: [:professional, :student, :booked_by],
         order_by: a.start_at
       )
@@ -243,18 +244,18 @@ defmodule Cae.Scheduling do
   {:ok, appointment} or {:error, changeset}
   """
   def book_appointment(appointment_id, student_id, booked_by_id) do
-    appointment = get_appointment!(appointment_id)
+    case mark_appointment_as_booked(appointment_id, student_id, booked_by_id) do
+      {:ok, appointment} ->
+        {:ok, appointment}
 
-    if appointment.status != "available" do
-      {:error, "El turno no está disponible"}
-    else
-      appointment
-      |> Appointment.book_changeset(%{
-        student_id: student_id,
-        booked_by_id: booked_by_id,
-        status: "booked"
-      })
-      |> Repo.update()
+      {:error, :not_available} ->
+        {:error, "El turno no está disponible"}
+
+      {:error, :weekly_limit_reached} ->
+        {:error, "El alumno ya tiene un turno reservado esta semana"}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -269,6 +270,117 @@ defmodule Cae.Scheduling do
     appointment
     |> Appointment.cancel_changeset()
     |> Repo.update()
+  end
+
+  @doc """
+  Cancels a booked appointment only when it belongs to the given student.
+  """
+  def cancel_student_appointment(student_id, appointment_id) do
+    Repo.transaction(fn ->
+      case get_appointment(appointment_id) do
+        %Appointment{student_id: ^student_id, status: "booked"} = appointment ->
+          cancellation_attrs = %{
+            appointment_id: appointment.id,
+            student_id: student_id,
+            professional_id: appointment.professional_id,
+            cancelled_by_role: "student",
+            start_at: appointment.start_at,
+            end_at: appointment.end_at
+          }
+
+          case %AppointmentCancellation{}
+               |> AppointmentCancellation.changeset(cancellation_attrs)
+               |> Repo.insert() do
+            {:ok, _cancellation} ->
+              case appointment
+                   |> Appointment.changeset(%{
+                     status: "available",
+                     student_id: nil,
+                     booked_by_id: nil
+                   })
+                   |> Repo.update() do
+                {:ok, appointment} -> appointment
+                {:error, changeset} -> Repo.rollback(changeset)
+              end
+
+            {:error, changeset} ->
+              Repo.rollback(changeset)
+          end
+
+        %Appointment{} ->
+          Repo.rollback(:not_owned)
+
+        nil ->
+          Repo.rollback(:not_found)
+      end
+    end)
+  end
+
+  @doc """
+  Cancels a booked appointment from the professional side and records cancellation source.
+  """
+  def cancel_professional_appointment(professional_id, appointment_id) do
+    Repo.transaction(fn ->
+      case get_appointment(appointment_id) do
+        %Appointment{professional_id: ^professional_id, status: "booked"} = appointment ->
+          cancellation_attrs = %{
+            appointment_id: appointment.id,
+            student_id: appointment.student_id,
+            professional_id: professional_id,
+            cancelled_by_role: "professional",
+            start_at: appointment.start_at,
+            end_at: appointment.end_at
+          }
+
+          case %AppointmentCancellation{}
+               |> AppointmentCancellation.changeset(cancellation_attrs)
+               |> Repo.insert() do
+            {:ok, _cancellation} ->
+              case appointment
+                   |> Appointment.cancel_changeset()
+                   |> Repo.update() do
+                {:ok, appointment} -> appointment
+                {:error, changeset} -> Repo.rollback(changeset)
+              end
+
+            {:error, changeset} ->
+              Repo.rollback(changeset)
+          end
+
+        %Appointment{} ->
+          Repo.rollback(:not_owned)
+
+        nil ->
+          Repo.rollback(:not_found)
+      end
+    end)
+  end
+
+  @doc """
+  Lists cancellation history for a student.
+  """
+  def list_student_cancellations(student_id) do
+    from(c in AppointmentCancellation,
+      where: c.student_id == ^student_id,
+      preload: [:professional, :student],
+      order_by: [desc: c.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists appointment IDs that were recently released by cancellation for a professional.
+  """
+  def list_recently_released_appointment_ids(professional_id, hours \\ 24)
+      when is_integer(hours) and hours > 0 do
+    cutoff = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    from(c in AppointmentCancellation,
+      where: c.professional_id == ^professional_id and c.inserted_at >= ^cutoff,
+      select: c.appointment_id,
+      distinct: true
+    )
+    |> Repo.all()
   end
 
   @doc """
@@ -464,7 +576,9 @@ defmodule Cae.Scheduling do
 
     from(a in Appointment,
       join: p in assoc(a, :professional),
-      where: a.status == "available" and a.start_at > ^now and p.role == "psychologist",
+      where: a.status == "available",
+      where: a.start_at > ^now,
+      where: p.role == "psychologist",
       preload: [professional: p],
       order_by: [asc: a.start_at]
     )
@@ -475,27 +589,60 @@ defmodule Cae.Scheduling do
   Atomically books an appointment only if it is currently available.
   """
   def book_available_appointment_for_student(appointment_id, student_id) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    mark_appointment_as_booked(appointment_id, student_id, student_id)
+  end
 
+  defp mark_appointment_as_booked(appointment_id, student_id, booked_by_id) do
     Repo.transaction(fn ->
-      query =
-        from(a in Appointment,
-          where: a.id == ^appointment_id and a.status == "available"
-        )
+      case get_appointment(appointment_id) do
+        %Appointment{status: "available", start_at: start_at} ->
+          if student_has_booking_in_week?(student_id, start_at) do
+            Repo.rollback(:weekly_limit_reached)
+          else
+            now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-      case Repo.update_all(query,
-             set: [
-               status: "booked",
-               student_id: student_id,
-               booked_by_id: student_id,
-               updated_at: now
-             ],
-             returning: true
-           ) do
-        {1, [appointment]} -> Repo.preload(appointment, [:professional, :student, :booked_by])
-        _ -> Repo.rollback(:not_available)
+            query =
+              from(a in Appointment,
+                where: a.id == ^appointment_id and a.status == "available"
+              )
+
+            case Repo.update_all(query,
+                   set: [
+                     status: "booked",
+                     student_id: student_id,
+                     booked_by_id: booked_by_id,
+                     updated_at: now
+                   ]
+                 ) do
+              {1, _} -> get_appointment!(appointment_id)
+              _ -> Repo.rollback(:not_available)
+            end
+          end
+
+        %Appointment{} ->
+          Repo.rollback(:not_available)
+
+        nil ->
+          Repo.rollback(:not_available)
       end
     end)
+  end
+
+  defp student_has_booking_in_week?(student_id, start_at) do
+    target_date = DateTime.to_date(start_at)
+    week_start = Date.beginning_of_week(target_date)
+    week_end = Date.end_of_week(target_date)
+
+    query =
+      from(a in Appointment,
+        where:
+          a.student_id == ^student_id and
+            a.status == "booked" and
+            fragment("?::date", a.start_at) >= ^week_start and
+            fragment("?::date", a.start_at) <= ^week_end
+      )
+
+    Repo.aggregate(query, :count) > 0
   end
 
   defp fetch_professional(professional_id) do
