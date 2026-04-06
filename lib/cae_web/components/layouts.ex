@@ -169,7 +169,7 @@ defmodule CaeWeb.Layouts do
             },
             %{
               label: "Sacar Turno",
-              path: ~p"/live/student/book-appointment",
+              path: ~p"/live/student/schedule",
               icon: "hero-plus-circle"
             }
           ]
