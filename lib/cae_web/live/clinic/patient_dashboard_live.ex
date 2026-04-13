@@ -1,8 +1,6 @@
 defmodule CaeWeb.Clinic.PatientDashboardLive do
   use CaeWeb, :live_view
 
-  require Logger
-
   alias Cae.Accounts
   alias Cae.MedicalRecords
 
@@ -118,10 +116,6 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
     deactivate_diagnosis = Map.get(params, "deactivate_diagnosis", "false")
     professional = current_professional(socket.assigns.current_scope)
     professional_id = professional && professional.id
-
-    Logger.debug(fn ->
-      "save_note student_id=#{socket.assigns.student_id} professional_id=#{inspect(professional_id)} content_size=#{byte_size(content)} diagnosis_id=#{diagnosis_id} diagnosis_name=#{diagnosis_name} deactivate=#{deactivate_diagnosis}"
-    end)
 
     if String.trim(content) == "" do
       form =
