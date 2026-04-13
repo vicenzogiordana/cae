@@ -309,6 +309,134 @@ defmodule Cae.MedicalRecords do
   end
 
   @doc """
+  Creates a clinical note and optionally creates a diagnosis linked to the same student/professional.
+
+  If `diagnosis_name` is blank, only the clinical note is created.
+  """
+  def create_clinical_note_with_optional_diagnosis(note_attrs, diagnosis_params) do
+    diagnosis_params = diagnosis_params || %{}
+
+    diagnosis_name =
+      diagnosis_params
+      |> Map.get("diagnosis_name", "")
+      |> to_string()
+      |> String.trim()
+
+    diagnosis_id =
+      diagnosis_params
+      |> Map.get("diagnosis_id", "")
+      |> to_string()
+      |> String.trim()
+
+    deactivate_diagnosis =
+      diagnosis_params
+      |> Map.get("deactivate_diagnosis", "false")
+      |> to_string()
+      |> String.downcase()
+      |> then(&(&1 in ["true", "on", "1"]))
+
+    Repo.transaction(fn ->
+      case create_clinical_note(note_attrs) do
+        {:ok, note} ->
+          if diagnosis_id == "" do
+            if diagnosis_name == "" do
+              note
+            else
+              diagnosis_attrs = %{
+                "student_id" => note.student_id,
+                "professional_id" => note.professional_id,
+                "name" => diagnosis_name
+              }
+
+              case create_diagnosis(diagnosis_attrs) do
+                {:ok, diagnosis} ->
+                  case append_diagnosis_event_to_note(note, :created, diagnosis.name) do
+                    {:ok, updated_note} -> updated_note
+                    {:error, changeset} -> Repo.rollback(changeset)
+                  end
+
+                {:error, changeset} ->
+                  Repo.rollback(changeset)
+              end
+            end
+          else
+            case Integer.parse(diagnosis_id) do
+              {parsed_id, ""} ->
+                case Repo.get_by(Diagnosis, id: parsed_id, student_id: note.student_id) do
+                  nil ->
+                    changeset =
+                      add_error(change(%Diagnosis{}), :diagnosis_id, "diagnóstico inválido")
+
+                    Repo.rollback(changeset)
+
+                  diagnosis ->
+                    cond do
+                      deactivate_diagnosis ->
+                        case deactivate_diagnosis(diagnosis) do
+                          {:ok, updated_diagnosis} ->
+                            case append_diagnosis_event_to_note(
+                                   note,
+                                   :deactivated,
+                                   updated_diagnosis.name
+                                 ) do
+                              {:ok, updated_note} -> updated_note
+                              {:error, changeset} -> Repo.rollback(changeset)
+                            end
+
+                          {:error, changeset} ->
+                            Repo.rollback(changeset)
+                        end
+
+                      diagnosis_name != "" ->
+                        case update_diagnosis(diagnosis, %{
+                               "student_id" => diagnosis.student_id,
+                               "professional_id" => diagnosis.professional_id,
+                               "name" => diagnosis_name,
+                               "is_active" => diagnosis.is_active
+                             }) do
+                          {:ok, updated_diagnosis} ->
+                            case append_diagnosis_event_to_note(
+                                   note,
+                                   :updated,
+                                   updated_diagnosis.name
+                                 ) do
+                              {:ok, updated_note} -> updated_note
+                              {:error, changeset} -> Repo.rollback(changeset)
+                            end
+
+                          {:error, changeset} ->
+                            Repo.rollback(changeset)
+                        end
+
+                      true ->
+                        note
+                    end
+                end
+
+              _ ->
+                changeset = add_error(change(%Diagnosis{}), :diagnosis_id, "diagnóstico inválido")
+                Repo.rollback(changeset)
+            end
+          end
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
+    end)
+    |> case do
+      {:ok, note} -> {:ok, note}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  defp append_diagnosis_event_to_note(%ClinicalNote{} = note, action, diagnosis_name) do
+    marker = "[diagnostico_evento:#{action}|#{diagnosis_name}]"
+    updated_content = "#{note.encrypted_content}\n#{marker}"
+
+    update_clinical_note(note, %{"encrypted_content" => updated_content})
+  end
+
+  @doc """
   Updates a clinical note.
   """
   def update_clinical_note(%ClinicalNote{} = note, attrs) do

@@ -24,6 +24,9 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
       new_note_form =
         to_form(%{
           "content" => "",
+          "diagnosis_name" => "",
+          "diagnosis_id" => "",
+          "deactivate_diagnosis" => "false",
           "student_id" => student.id,
           "professional_id" => professional_id
         })
@@ -89,36 +92,76 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
   end
 
   @impl true
-  def handle_event("validate_note", %{"content" => content}, socket) do
-    form = to_form(%{"content" => content}, errors: [])
+  def handle_event("validate_note", %{"content" => content} = params, socket) do
+    diagnosis_name = Map.get(params, "diagnosis_name", "")
+    diagnosis_id = Map.get(params, "diagnosis_id", "")
+    deactivate_diagnosis = Map.get(params, "deactivate_diagnosis", "false")
+
+    form =
+      to_form(
+        %{
+          "content" => content,
+          "diagnosis_name" => diagnosis_name,
+          "diagnosis_id" => diagnosis_id,
+          "deactivate_diagnosis" => deactivate_diagnosis
+        },
+        errors: []
+      )
+
     {:noreply, assign(socket, :new_note_form, form)}
   end
 
   @impl true
-  def handle_event("save_note", %{"content" => content}, socket) do
+  def handle_event("save_note", %{"content" => content} = params, socket) do
+    diagnosis_name = Map.get(params, "diagnosis_name", "")
+    diagnosis_id = Map.get(params, "diagnosis_id", "")
+    deactivate_diagnosis = Map.get(params, "deactivate_diagnosis", "false")
+
     if String.trim(content) == "" do
-      form = to_form(%{"content" => content}, errors: [content: {"no puede estar vacío", []}])
+      form =
+        to_form(
+          %{
+            "content" => content,
+            "diagnosis_name" => diagnosis_name,
+            "diagnosis_id" => diagnosis_id,
+            "deactivate_diagnosis" => deactivate_diagnosis
+          },
+          errors: [content: {"no puede estar vacío", []}]
+        )
+
       {:noreply, assign(socket, :new_note_form, form)}
     else
       socket = assign(socket, :saving_note, true)
 
-      case MedicalRecords.create_clinical_note(%{
-             "student_id" => socket.assigns.student_id,
-             "professional_id" => socket.assigns.current_user.id,
-             "encrypted_content" => content,
-             "appointment_id" => nil
-           }) do
+      case MedicalRecords.create_clinical_note_with_optional_diagnosis(
+             %{
+               "student_id" => socket.assigns.student_id,
+               "professional_id" => socket.assigns.current_user.id,
+               "encrypted_content" => content,
+               "appointment_id" => nil
+             },
+             %{
+               "diagnosis_name" => diagnosis_name,
+               "diagnosis_id" => diagnosis_id,
+               "deactivate_diagnosis" => deactivate_diagnosis
+             }
+           ) do
         {:ok, _note} ->
           # Refresh clinical notes and rebuild timeline
           clinical_notes = MedicalRecords.list_student_clinical_notes(socket.assigns.student_id)
+          diagnoses = MedicalRecords.list_student_diagnoses(socket.assigns.student_id, false)
 
           {:noreply,
            socket
            |> assign(:month_groups, build_month_groups(clinical_notes))
+           |> assign(:diagnoses, diagnoses)
            |> assign(
              :new_note_form,
              to_form(%{
                "content" => "",
+               "diagnosis_name" => "",
+               "diagnosis_id" => "",
+               "deactivate_diagnosis" => "false",
                "student_id" => socket.assigns.student_id,
                "professional_id" => socket.assigns.current_user.id
              })
@@ -235,8 +278,14 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                 <ul class="timeline timeline-compact timeline-vertical">
                   <li :for={note <- group.notes}>
                     <div class="timeline-middle">
-                      <div class="grid h-9 w-9 place-items-center rounded-full bg-success/10 text-success">
-                        <.icon name="hero-check-circle" class="size-5" />
+                      <div class={[
+                        "grid h-9 w-9 place-items-center rounded-full",
+                        diagnosis_event_timeline_class(note.diagnosis_event, :recent)
+                      ]}>
+                        <.icon
+                          name={diagnosis_event_timeline_icon(note.diagnosis_event, :recent)}
+                          class="size-5"
+                        />
                       </div>
                     </div>
 
@@ -245,6 +294,15 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                         <div class="flex flex-col gap-3">
                           <div class="flex flex-wrap items-center gap-3 text-xs text-base-content/60">
                             <span class="badge badge-soft badge-neutral">{note.note_kind}</span>
+                            <span
+                              :if={note.diagnosis_event}
+                              class={[
+                                "badge badge-soft",
+                                diagnosis_event_badge_class(note.diagnosis_event.action)
+                              ]}
+                            >
+                              {diagnosis_event_label(note.diagnosis_event)}
+                            </span>
                             <span>{note.session_label}</span>
                           </div>
 
@@ -315,8 +373,14 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                       <ul class="timeline timeline-compact timeline-vertical">
                         <li :for={note <- group.notes}>
                           <div class="timeline-middle">
-                            <div class="grid h-9 w-9 place-items-center rounded-full bg-base-200 text-base-content/60">
-                              <.icon name="hero-document-text" class="size-5" />
+                            <div class={[
+                              "grid h-9 w-9 place-items-center rounded-full",
+                              diagnosis_event_timeline_class(note.diagnosis_event, :old)
+                            ]}>
+                              <.icon
+                                name={diagnosis_event_timeline_icon(note.diagnosis_event, :old)}
+                                class="size-5"
+                              />
                             </div>
                           </div>
 
@@ -326,6 +390,15 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                                 <div class="flex flex-wrap items-center gap-3 text-xs text-base-content/60">
                                   <span class="badge badge-soft badge-neutral">
                                     {note.note_kind}
+                                  </span>
+                                  <span
+                                    :if={note.diagnosis_event}
+                                    class={[
+                                      "badge badge-soft",
+                                      diagnosis_event_badge_class(note.diagnosis_event.action)
+                                    ]}
+                                  >
+                                    {diagnosis_event_label(note.diagnosis_event)}
                                   </span>
                                   <span>{note.session_label}</span>
                                 </div>
@@ -443,6 +516,62 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                   class="textarea textarea-bordered textarea-sm h-full min-h-40 w-full resize-y focus:textarea-primary"
                   rows="8"
                 />
+              </div>
+
+              <div class="space-y-2">
+                <label for="diagnosis-name" class="block text-sm font-medium text-base-content">
+                  Diagnóstico (opcional)
+                </label>
+
+                <select
+                  id="diagnosis-id"
+                  name="diagnosis_id"
+                  class="select select-bordered select-sm w-full"
+                >
+                  <option value="">Crear nuevo diagnóstico</option>
+                  <option
+                    :for={diagnosis <- @diagnoses}
+                    value={diagnosis.id}
+                    selected={
+                      to_string(diagnosis.id) ==
+                        Phoenix.HTML.Form.input_value(@new_note_form, :diagnosis_id)
+                    }
+                  >
+                    {diagnosis.name}
+                  </option>
+                </select>
+
+                <input
+                  id="diagnosis-name"
+                  name="diagnosis_name"
+                  type="text"
+                  value={Phoenix.HTML.Form.input_value(@new_note_form, :diagnosis_name)}
+                  placeholder="Ej: Trastorno de ansiedad generalizada"
+                  class="input input-bordered input-sm w-full"
+                />
+
+                <label class="label cursor-pointer justify-start gap-2">
+                  <input
+                    type="checkbox"
+                    class="checkbox checkbox-sm"
+                    name="deactivate_diagnosis"
+                    value="true"
+                    checked={
+                      Phoenix.HTML.Form.input_value(@new_note_form, :deactivate_diagnosis) in [
+                        true,
+                        "true",
+                        "on",
+                        "1"
+                      ]
+                    }
+                  />
+                  <span class="label-text">Desactivar diagnóstico seleccionado</span>
+                </label>
+
+                <p class="text-xs text-base-content/60">
+                  Si seleccionas uno existente y completas nombre, lo actualiza. Si activas desactivar, lo desactiva.
+                  Si no seleccionas ninguno y completas nombre, crea uno nuevo.
+                </p>
               </div>
             </div>
 
@@ -577,6 +706,7 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
 
   defp enrich_clinical_note(note) do
     content = note.encrypted_content |> normalize_note_content()
+    {content, diagnosis_event} = extract_diagnosis_event(content)
     {note_content, attachment_name} = extract_attachment_name(content)
     professional_name = professional_display_name(note.professional)
 
@@ -586,6 +716,7 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
       session_label: format_session_datetime(note.inserted_at),
       note_kind: "Evolución clínica",
       content: note_content,
+      diagnosis_event: diagnosis_event,
       professional_name: professional_name,
       professional_role: professional_role_label(note.professional),
       professional_avatar_url: avatar_url(professional_name),
@@ -626,6 +757,63 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
         {String.trim(content), nil}
     end
   end
+
+  defp extract_diagnosis_event(content) when is_binary(content) do
+    regex = ~r/\[diagnostico_evento:\s*(created|updated|deactivated)\|([^\]]+)\]/u
+
+    case Regex.run(regex, content) do
+      [full_match, action, diagnosis_name] ->
+        cleaned_content =
+          content
+          |> String.replace(full_match, "")
+          |> String.trim()
+
+        event = %{action: action, diagnosis_name: String.trim(diagnosis_name)}
+        {cleaned_content, event}
+
+      _ ->
+        {content, nil}
+    end
+  end
+
+  defp extract_diagnosis_event(content), do: {to_string(content), nil}
+
+  defp diagnosis_event_badge_class("created"), do: "badge-success"
+  defp diagnosis_event_badge_class("updated"), do: "badge-info"
+  defp diagnosis_event_badge_class("deactivated"), do: "badge-warning"
+  defp diagnosis_event_badge_class(_), do: "badge-neutral"
+
+  defp diagnosis_event_timeline_class(nil, :recent), do: "bg-success/10 text-success"
+  defp diagnosis_event_timeline_class(nil, :old), do: "bg-base-200 text-base-content/60"
+
+  defp diagnosis_event_timeline_class(%{action: "created"}, _section),
+    do: "bg-success/10 text-success"
+
+  defp diagnosis_event_timeline_class(%{action: "updated"}, _section), do: "bg-info/15 text-info"
+
+  defp diagnosis_event_timeline_class(%{action: "deactivated"}, _section),
+    do: "bg-warning/20 text-warning"
+
+  defp diagnosis_event_timeline_class(_, :recent), do: "bg-success/10 text-success"
+  defp diagnosis_event_timeline_class(_, :old), do: "bg-base-200 text-base-content/60"
+
+  defp diagnosis_event_timeline_icon(nil, :recent), do: "hero-check-circle"
+  defp diagnosis_event_timeline_icon(nil, :old), do: "hero-document-text"
+  defp diagnosis_event_timeline_icon(%{action: "created"}, _section), do: "hero-check-circle"
+  defp diagnosis_event_timeline_icon(%{action: "updated"}, _section), do: "hero-document-text"
+  defp diagnosis_event_timeline_icon(%{action: "deactivated"}, _section), do: "hero-x-mark"
+  defp diagnosis_event_timeline_icon(_, :recent), do: "hero-check-circle"
+  defp diagnosis_event_timeline_icon(_, :old), do: "hero-document-text"
+
+  defp diagnosis_event_label(%{action: "created", diagnosis_name: name}), do: "Dx creado: #{name}"
+
+  defp diagnosis_event_label(%{action: "updated", diagnosis_name: name}),
+    do: "Dx actualizado: #{name}"
+
+  defp diagnosis_event_label(%{action: "deactivated", diagnosis_name: name}),
+    do: "Dx desactivado: #{name}"
+
+  defp diagnosis_event_label(_), do: "Dx"
 
   defp format_session_datetime(%DateTime{} = datetime),
     do: Calendar.strftime(datetime, "%d/%m/%Y %H:%M")
