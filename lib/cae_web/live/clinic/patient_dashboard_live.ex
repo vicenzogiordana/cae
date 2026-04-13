@@ -416,14 +416,34 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
               <label for="note-content" class="block text-sm font-medium text-base-content">
                 Contenido de la nota
               </label>
-              <textarea
-                id="note-content"
-                name="content"
-                value={Phoenix.HTML.Form.input_value(@new_note_form, :content)}
-                placeholder="Describe la evolución del paciente, observaciones de la sesión, cambios detectados, tareas asignadas, etc."
-                class="textarea textarea-bordered textarea-sm h-full min-h-40 w-full resize-y focus:textarea-primary"
-                rows="8"
-              />
+
+              <div
+                id="note-rich-editor-wrapper"
+                phx-hook="RichTextNoteEditor"
+                phx-update="ignore"
+                data-input-id="note-content"
+                class="flex min-h-0 flex-1 flex-col gap-2"
+              >
+                <div
+                  data-editor-shell
+                  class="hidden min-h-0 flex-1 overflow-hidden rounded-lg border border-base-content/10"
+                >
+                  <div
+                    data-editorjs-holder
+                    class="min-h-0 flex-1 overflow-y-auto px-3 py-2"
+                  >
+                  </div>
+                </div>
+
+                <textarea
+                  id="note-content"
+                  name="content"
+                  value={Phoenix.HTML.Form.input_value(@new_note_form, :content)}
+                  placeholder="Describe la evolución del paciente, observaciones de la sesión, cambios detectados, tareas asignadas, etc."
+                  class="textarea textarea-bordered textarea-sm h-full min-h-40 w-full resize-y focus:textarea-primary"
+                  rows="8"
+                />
+              </div>
             </div>
 
             <%!-- Optional: Attach documents to this note --%>

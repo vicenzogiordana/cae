@@ -339,4 +339,144 @@
     }
   }
 
+  window.CaeHooks.RichTextNoteEditor = {
+    mounted() {
+      const inputId = this.el.dataset.inputId
+      this.inputEl = inputId ? document.getElementById(inputId) : null
+      this.editorShell = this.el.querySelector("[data-editor-shell]")
+      this.editorHolder = this.el.querySelector("[data-editorjs-holder]")
+
+      if (!this.inputEl || !this.editorShell || !this.editorHolder || !window.EditorJS) {
+        return
+      }
+
+      this.editorShell.classList.remove("hidden")
+      this.inputEl.classList.add("hidden")
+      this.inputEl.setAttribute("aria-hidden", "true")
+      this.inputEl.tabIndex = -1
+
+      const initialContent = (this.inputEl.value || "").trim()
+      const initialData = initialContent
+        ? {
+            blocks: [{ type: "paragraph", data: { text: initialContent.replace(/\n/g, "<br>") } }]
+          }
+        : { blocks: [] }
+
+      this.extractPlainText = (outputData) => {
+        const blocks = Array.isArray(outputData?.blocks) ? outputData.blocks : []
+
+        return blocks
+          .map((block) => {
+            const value = block?.data?.text
+            if (typeof value !== "string") return ""
+
+            const temp = document.createElement("div")
+            temp.innerHTML = value
+            return temp.textContent || temp.innerText || ""
+          })
+          .map((text) => text.trim())
+          .filter((text) => text.length > 0)
+          .join("\n")
+      }
+
+      this.syncFromEditor = async () => {
+        if (!this.editor || this.syncing) return
+
+        this.syncing = true
+        try {
+          const outputData = await this.editor.save()
+          this.inputEl.value = this.extractPlainText(outputData)
+          this.inputEl.dispatchEvent(new Event("input", { bubbles: true }))
+        } catch (_error) {
+          // Keep fallback input value unchanged on transient editor save errors
+        } finally {
+          this.syncing = false
+        }
+      }
+
+      const ListWithoutChecklist = class extends window.EditorjsList {
+        static get toolbox() {
+          const toolbox = super.toolbox
+
+          if (Array.isArray(toolbox)) {
+            return toolbox.filter((item) => {
+              const title = String(item?.title || "").toLowerCase()
+              return title !== "checklist"
+            })
+          }
+
+          return toolbox
+        }
+      }
+
+      this.editor = new window.EditorJS({
+        holder: this.editorHolder,
+        minHeight: 280,
+        autofocus: false,
+        defaultBlock: "paragraph",
+        tools: {
+          paragraph: {
+            inlineToolbar: true
+          },
+          header: {
+            class: window.Header,
+            inlineToolbar: true,
+            config: {
+              levels: [2, 3, 4],
+              defaultLevel: 3
+            }
+          },
+          list: {
+            class: ListWithoutChecklist,
+            inlineToolbar: true,
+            config: {
+              defaultStyle: "unordered"
+            }
+          },
+          warning: {
+            class: window.Warning,
+            inlineToolbar: false,
+            config: {
+              titlePlaceholder: "Advertencia",
+              messagePlaceholder: "Escribe la advertencia"
+            }
+          }
+        },
+        data: initialData,
+        onReady: () => {
+          void this.syncFromEditor()
+        },
+        onChange: async () => {
+          await this.syncFromEditor()
+        }
+      })
+    },
+
+    async destroyed() {
+      if (this.editor && typeof this.editor.destroy === "function") {
+        await this.editor.destroy()
+      }
+    },
+
+    updated() {
+      // When LiveView updates hidden input value (e.g. validation reset), keep editor in sync.
+      if (!this.editor || !this.inputEl) return
+
+      const incoming = (this.inputEl.value || "").trim()
+      if (!incoming) return
+
+      this.editor
+        .save()
+        .then((data) => {
+          const current = this.extractPlainText(data)
+          if (current === incoming) return
+
+          this.editor.render({
+            blocks: [{ type: "paragraph", data: { text: incoming.replace(/\n/g, "<br>") } }]
+          })
+        })
+        .catch(() => {})
+    }
+  }
+
 })()

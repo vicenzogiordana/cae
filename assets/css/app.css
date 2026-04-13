@@ -2,6 +2,7 @@
    https://tailwindcss.com/docs/configuration */
 
 @import "tailwindcss";
+@import "flyonui/src/vendor/editor.css";
 @source "../css";
 @source "../js";
 @source "../../lib/cae_web";
@@ -26,6 +27,31 @@
 
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
+
+/* Keep EditorJS note area scrollable inside the drawer. */
+#note-rich-editor-wrapper [data-editor-shell] {
+   min-height: 0;
+   display: flex;
+   flex-direction: column;
+}
+
+#note-rich-editor-wrapper [data-editorjs-holder] {
+   min-height: 0;
+   flex: 1 1 auto;
+   overflow-y: auto;
+   overscroll-behavior: contain;
+}
+
+#note-rich-editor-wrapper .codex-editor,
+#note-rich-editor-wrapper .codex-editor__redactor {
+   min-height: 100%;
+}
+
+#note-rich-editor-wrapper .codex-editor__redactor {
+   max-height: 100%;
+   overflow-y: auto;
+   padding-bottom: 1.5rem !important;
+}
 
 /* FullCalendar theme overrides aligned with FlyonUI tokens. */
 .fc {
