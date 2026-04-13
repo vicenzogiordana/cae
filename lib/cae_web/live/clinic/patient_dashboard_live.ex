@@ -410,9 +410,9 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
             id="new-clinical-note-form"
             phx-submit="save_note"
             phx-change="validate_note"
-            class="space-y-4"
+            class="flex h-full flex-col gap-4"
           >
-            <div class="space-y-2">
+            <div class="flex min-h-0 flex-1 flex-col gap-2">
               <label for="note-content" class="block text-sm font-medium text-base-content">
                 Contenido de la nota
               </label>
@@ -421,7 +421,7 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                 name="content"
                 value={Phoenix.HTML.Form.input_value(@new_note_form, :content)}
                 placeholder="Describe la evolución del paciente, observaciones de la sesión, cambios detectados, tareas asignadas, etc."
-                class="textarea textarea-bordered textarea-sm w-full resize-none focus:textarea-primary"
+                class="textarea textarea-bordered textarea-sm h-full min-h-40 w-full resize-y focus:textarea-primary"
                 rows="8"
               />
             </div>
