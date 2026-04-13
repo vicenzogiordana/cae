@@ -1,6 +1,8 @@
 defmodule CaeWeb.Clinic.PatientDashboardLive do
   use CaeWeb, :live_view
 
+  require Logger
+
   alias Cae.Accounts
   alias Cae.MedicalRecords
 
@@ -15,10 +17,8 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
          true <- student.role == "student" do
       diagnoses = MedicalRecords.list_student_diagnoses(student.id, false)
       clinical_notes = MedicalRecords.list_student_clinical_notes(student.id)
-
-      # Get current professional from socket (assumes authenticated)
-      current_user = socket.assigns[:current_user]
-      professional_id = if current_user, do: current_user.id, else: nil
+      current_scope = socket.assigns[:current_scope]
+      current_professional = current_professional(current_scope)
 
       # Build form for new clinical note
       new_note_form =
@@ -28,14 +28,14 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
           "diagnosis_id" => "",
           "deactivate_diagnosis" => "false",
           "student_id" => student.id,
-          "professional_id" => professional_id
+          "professional_id" => current_professional && current_professional.id
         })
 
       {:ok,
        socket
        |> assign(:page_title, "Dashboard 360")
-       |> assign(:current_scope, socket.assigns[:current_scope])
-       |> assign(:current_user, current_user)
+       |> assign(:current_scope, current_scope)
+       |> assign(:current_user, current_professional)
        |> assign(:student_id, student.id)
        |> assign(:patient, build_patient(student, student_profile))
        |> assign(:diagnoses, diagnoses)
@@ -116,6 +116,12 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
     diagnosis_name = Map.get(params, "diagnosis_name", "")
     diagnosis_id = Map.get(params, "diagnosis_id", "")
     deactivate_diagnosis = Map.get(params, "deactivate_diagnosis", "false")
+    professional = current_professional(socket.assigns.current_scope)
+    professional_id = professional && professional.id
+
+    Logger.debug(fn ->
+      "save_note student_id=#{socket.assigns.student_id} professional_id=#{inspect(professional_id)} content_size=#{byte_size(content)} diagnosis_id=#{diagnosis_id} diagnosis_name=#{diagnosis_name} deactivate=#{deactivate_diagnosis}"
+    end)
 
     if String.trim(content) == "" do
       form =
@@ -136,7 +142,7 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
       case MedicalRecords.create_clinical_note_with_optional_diagnosis(
              %{
                "student_id" => socket.assigns.student_id,
-               "professional_id" => socket.assigns.current_user.id,
+               "professional_id" => professional_id,
                "encrypted_content" => content,
                "appointment_id" => nil
              },
@@ -163,7 +169,7 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                "diagnosis_id" => "",
                "deactivate_diagnosis" => "false",
                "student_id" => socket.assigns.student_id,
-               "professional_id" => socket.assigns.current_user.id
+               "professional_id" => professional_id
              })
            )
            |> assign(:saving_note, false)
@@ -306,7 +312,9 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                             <span>{note.session_label}</span>
                           </div>
 
-                          <p class="text-sm leading-6 text-base-content/80">{note.content}</p>
+                          <div class="editor-note-content text-sm leading-6 text-base-content/80">
+                            {note.content_html}
+                          </div>
 
                           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div class="flex items-center gap-3 rounded-2xl bg-base-100 p-3">
@@ -403,9 +411,9 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                                   <span>{note.session_label}</span>
                                 </div>
 
-                                <p class="text-sm leading-6 text-base-content/80">
-                                  {note.content}
-                                </p>
+                                <div class="editor-note-content text-sm leading-6 text-base-content/80">
+                                  {note.content_html}
+                                </div>
 
                                 <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                   <div class="flex items-center gap-3 rounded-2xl bg-base-100 p-3">
@@ -706,8 +714,7 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
 
   defp enrich_clinical_note(note) do
     content = note.encrypted_content |> normalize_note_content()
-    {content, diagnosis_event} = extract_diagnosis_event(content)
-    {note_content, attachment_name} = extract_attachment_name(content)
+    {note_content, diagnosis_event, attachment_name, content_html} = parse_note_content(content)
     professional_name = professional_display_name(note.professional)
 
     %{
@@ -716,6 +723,7 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
       session_label: format_session_datetime(note.inserted_at),
       note_kind: "Evolución clínica",
       content: note_content,
+      content_html: Phoenix.HTML.raw(content_html),
       diagnosis_event: diagnosis_event,
       professional_name: professional_name,
       professional_role: professional_role_label(note.professional),
@@ -747,6 +755,242 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
   defp normalize_note_content(content) when is_binary(content), do: String.trim(content)
   defp normalize_note_content(content), do: content |> to_string() |> String.trim()
 
+  defp current_professional(nil), do: first_available_professional(nil)
+
+  defp current_professional(current_scope) when is_map(current_scope) do
+    user =
+      Map.get(current_scope, :user) ||
+        Map.get(current_scope, "user") ||
+        Map.get(current_scope, :current_user) ||
+        Map.get(current_scope, "current_user")
+
+    cond do
+      is_map(user) and is_integer(Map.get(user, :id)) -> Accounts.get_user!(Map.get(user, :id))
+      is_map(user) and is_integer(Map.get(user, "id")) -> Accounts.get_user!(Map.get(user, "id"))
+      is_map(user) -> resolve_professional_from_scope_user(user)
+      true -> nil
+    end
+  end
+
+  defp current_professional(_), do: first_available_professional(nil)
+
+  defp resolve_professional_from_scope_user(user) do
+    role = scope_user_role(user)
+    email = scope_user_email(user)
+    first_name = scope_user_first_name(user)
+    last_name = scope_user_last_name(user)
+    full_name = Enum.join([first_name, last_name], " ") |> String.trim()
+
+    candidate_by_email =
+      if is_binary(email) and email != "" do
+        Accounts.get_user_by(email: email)
+      end
+
+    candidate_by_name =
+      if is_binary(role) and role != "" do
+        Accounts.list_users_by_role(role)
+        |> Enum.find(fn professional ->
+          professional_full_name = professional_display_name(professional)
+
+          professional_full_name == full_name or
+            professional.first_name == first_name or
+            professional.last_name == last_name
+        end)
+      end
+
+    candidate_by_email || candidate_by_name || first_available_professional(role)
+  end
+
+  defp scope_user_role(user) do
+    Map.get(user, :role) || Map.get(user, "role")
+  end
+
+  defp scope_user_email(user) do
+    Map.get(user, :email) || Map.get(user, "email")
+  end
+
+  defp scope_user_first_name(user) do
+    Map.get(user, :first_name) || Map.get(user, "first_name") || ""
+  end
+
+  defp scope_user_last_name(user) do
+    Map.get(user, :last_name) || Map.get(user, "last_name") || ""
+  end
+
+  defp first_available_professional(role)
+       when role in ["psychologist", "psychiatrist", "psychopedagogue"] do
+    Accounts.list_users_by_role(role) |> List.first()
+  end
+
+  defp first_available_professional(_role) do
+    ["psychologist", "psychiatrist", "psychopedagogue"]
+    |> Enum.find_value(fn candidate_role ->
+      Accounts.list_users_by_role(candidate_role) |> List.first()
+    end)
+  end
+
+  defp parse_note_content(content) do
+    content = to_string(content)
+
+    case Jason.decode(content) do
+      {:ok, payload} when is_map(payload) ->
+        case Map.get(payload, "blocks") do
+          blocks when is_list(blocks) ->
+            diagnosis_event = parse_diagnosis_event_meta(Map.get(payload, "diagnosis_event"))
+            rendered_html = render_editorjs_blocks(blocks)
+            plain_text = render_editorjs_plain_text(blocks)
+
+            {plain_text, diagnosis_event, nil, rendered_html}
+
+          _ ->
+            {content_without_markers, diagnosis_event} = extract_diagnosis_event(content)
+            {cleaned_content, attachment_name} = extract_attachment_name(content_without_markers)
+            html = render_plain_text_content(cleaned_content)
+
+            {cleaned_content, diagnosis_event, attachment_name, html}
+        end
+
+      _ ->
+        {content_without_markers, diagnosis_event} = extract_diagnosis_event(content)
+        {cleaned_content, attachment_name} = extract_attachment_name(content_without_markers)
+        html = render_plain_text_content(cleaned_content)
+
+        {cleaned_content, diagnosis_event, attachment_name, html}
+    end
+  end
+
+  defp render_editorjs_blocks(blocks) do
+    blocks
+    |> Enum.map_join("\n", &render_editorjs_block/1)
+  end
+
+  defp render_editorjs_plain_text(blocks) do
+    blocks
+    |> Enum.map(&editorjs_block_plain_text/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.filter(&(&1 != ""))
+    |> Enum.join("\n")
+  end
+
+  defp render_editorjs_block(%{"type" => "header", "data" => data}) do
+    level = data |> Map.get("level", 2) |> clamp_header_level()
+    text = Map.get(data, "text", "") |> to_string()
+
+    "<h#{level} class=\"font-bold tracking-tight text-base-content\">#{text}</h#{level}>"
+  end
+
+  defp render_editorjs_block(%{"type" => "paragraph", "data" => data}) do
+    text = Map.get(data, "text", "") |> to_string() |> String.replace("\n", "<br>")
+
+    "<p>#{text}</p>"
+  end
+
+  defp render_editorjs_block(%{"type" => "list", "data" => data}) do
+    items = Map.get(data, "items", [])
+    style = Map.get(data, "style", "unordered")
+    tag = if style == "ordered", do: "ol", else: "ul"
+    list_class = if style == "ordered", do: "list-decimal", else: "list-disc"
+
+    items_html =
+      items
+      |> Enum.map_join("", fn item ->
+        {item_text, nested_items} = parse_editorjs_list_item(item)
+
+        nested_html =
+          if nested_items == [],
+            do: "",
+            else:
+              render_editorjs_block(%{
+                "type" => "list",
+                "data" => %{"style" => style, "items" => nested_items}
+              })
+
+        "<li>#{item_text}#{nested_html}</li>"
+      end)
+
+    "<#{tag} class=\"ml-6 #{list_class} space-y-1\">#{items_html}</#{tag}>"
+  end
+
+  defp render_editorjs_block(%{"type" => "warning", "data" => data}) do
+    title = Map.get(data, "title", "Advertencia") |> to_string()
+    message = Map.get(data, "message", "") |> to_string()
+
+    """
+    <div class=\"my-3 rounded-xl border border-warning/30 bg-warning/10 p-4\">
+      <p class=\"font-semibold text-warning\">#{title}</p>
+      <div class=\"mt-1\">#{message}</div>
+    </div>
+    """
+  end
+
+  defp render_editorjs_block(%{"type" => _type, "data" => data}) when is_map(data) do
+    fallback = Map.get(data, "text", "") |> to_string() |> String.replace("\n", "<br>")
+
+    if fallback == "" do
+      ""
+    else
+      "<p>#{fallback}</p>"
+    end
+  end
+
+  defp render_editorjs_block(_), do: ""
+
+  defp editorjs_block_plain_text(%{"type" => "header", "data" => data}),
+    do: Map.get(data, "text", "") |> to_string()
+
+  defp editorjs_block_plain_text(%{"type" => "paragraph", "data" => data}),
+    do: Map.get(data, "text", "") |> to_string()
+
+  defp editorjs_block_plain_text(%{"type" => "warning", "data" => data}),
+    do:
+      [Map.get(data, "title", ""), Map.get(data, "message", "")]
+      |> Enum.map_join(" ", &to_string/1)
+
+  defp editorjs_block_plain_text(%{"type" => "list", "data" => data}),
+    do: data |> Map.get("items", []) |> Enum.map_join("\n", &editorjs_list_item_plain_text/1)
+
+  defp editorjs_block_plain_text(_), do: ""
+
+  defp editorjs_list_item_plain_text(%{"content" => content}), do: to_string(content)
+  defp editorjs_list_item_plain_text(%{"text" => text}), do: to_string(text)
+  defp editorjs_list_item_plain_text(content), do: to_string(content)
+
+  defp parse_editorjs_list_item(item) when is_map(item) do
+    text = Map.get(item, "content", Map.get(item, "text", "")) |> to_string()
+    nested_items = Map.get(item, "items", [])
+    {text, nested_items}
+  end
+
+  defp parse_editorjs_list_item(item), do: {to_string(item), []}
+
+  defp clamp_header_level(level) when level in 1..6, do: level
+  defp clamp_header_level(_), do: 2
+
+  defp render_plain_text_content(content) do
+    content
+    |> html_escape_preserving_breaks()
+    |> then(&"<p>#{&1}</p>")
+  end
+
+  defp html_escape_preserving_breaks(content) do
+    content
+    |> Phoenix.HTML.html_escape()
+    |> Phoenix.HTML.safe_to_string()
+    |> String.replace("\n", "<br>")
+  end
+
+  defp parse_diagnosis_event_meta(
+         %{"action" => action, "diagnosis_name" => diagnosis_name} = meta
+       ) do
+    %{
+      action: to_string(action),
+      diagnosis_name: to_string(diagnosis_name),
+      diagnosis_id: Map.get(meta, "diagnosis_id")
+    }
+  end
+
+  defp parse_diagnosis_event_meta(_), do: nil
+
   defp extract_attachment_name(content) when is_binary(content) do
     case Regex.run(~r/\[adjunto:\s*([^\]]+)\]/u, content) do
       [_, attachment_name] ->
@@ -758,7 +1002,8 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
     end
   end
 
-  defp extract_diagnosis_event(content) when is_binary(content) do
+  defp extract_diagnosis_event(content) do
+    content = to_string(content)
     regex = ~r/\[diagnostico_evento:\s*(created|updated|deactivated)\|([^\]]+)\]/u
 
     case Regex.run(regex, content) do
@@ -775,8 +1020,6 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
         {content, nil}
     end
   end
-
-  defp extract_diagnosis_event(content), do: {to_string(content), nil}
 
   defp diagnosis_event_badge_class("created"), do: "badge-success"
   defp diagnosis_event_badge_class("updated"), do: "badge-info"

@@ -356,27 +356,37 @@
       this.inputEl.tabIndex = -1
 
       const initialContent = (this.inputEl.value || "").trim()
-      const initialData = initialContent
-        ? {
-            blocks: [{ type: "paragraph", data: { text: initialContent.replace(/\n/g, "<br>") } }]
+
+      this.normalizeEditorData = (rawValue) => {
+        const trimmedValue = (rawValue || "").trim()
+        if (!trimmedValue) return { blocks: [] }
+
+        try {
+          const parsed = JSON.parse(trimmedValue)
+          if (parsed && typeof parsed === "object" && Array.isArray(parsed.blocks)) {
+            return {
+              time: parsed.time,
+              blocks: parsed.blocks,
+              version: parsed.version
+            }
           }
-        : { blocks: [] }
+        } catch (_error) {
+          // Fall through to plain text fallback.
+        }
 
-      this.extractPlainText = (outputData) => {
-        const blocks = Array.isArray(outputData?.blocks) ? outputData.blocks : []
+        return {
+          blocks: [{ type: "paragraph", data: { text: trimmedValue.replace(/\n/g, "<br>") } }]
+        }
+      }
 
-        return blocks
-          .map((block) => {
-            const value = block?.data?.text
-            if (typeof value !== "string") return ""
+      this.stripEditorMeta = (data) => {
+        const blocks = Array.isArray(data?.blocks) ? data.blocks : []
 
-            const temp = document.createElement("div")
-            temp.innerHTML = value
-            return temp.textContent || temp.innerText || ""
-          })
-          .map((text) => text.trim())
-          .filter((text) => text.length > 0)
-          .join("\n")
+        return {
+          time: data?.time,
+          blocks,
+          version: data?.version
+        }
       }
 
       this.syncFromEditor = async () => {
@@ -385,13 +395,31 @@
         this.syncing = true
         try {
           const outputData = await this.editor.save()
-          this.inputEl.value = this.extractPlainText(outputData)
+          this.inputEl.value = JSON.stringify(outputData)
           this.inputEl.dispatchEvent(new Event("input", { bubbles: true }))
         } catch (_error) {
           // Keep fallback input value unchanged on transient editor save errors
         } finally {
           this.syncing = false
         }
+      }
+
+      this.formEl = this.el.closest("form")
+      this.submitPending = false
+      this.handleSubmit = async (event) => {
+        if (this.submitPending) {
+          this.submitPending = false
+          return
+        }
+
+        event.preventDefault()
+        await this.syncFromEditor()
+        this.submitPending = true
+        event.target.requestSubmit()
+      }
+
+      if (this.formEl) {
+        this.formEl.addEventListener("submit", this.handleSubmit)
       }
 
       const ListWithoutChecklist = class extends window.EditorjsList {
@@ -442,7 +470,7 @@
             }
           }
         },
-        data: initialData,
+        data: this.normalizeEditorData(initialContent),
         onReady: () => {
           void this.syncFromEditor()
         },
@@ -453,6 +481,10 @@
     },
 
     async destroyed() {
+      if (this.formEl && this.handleSubmit) {
+        this.formEl.removeEventListener("submit", this.handleSubmit)
+      }
+
       if (this.editor && typeof this.editor.destroy === "function") {
         await this.editor.destroy()
       }
@@ -463,17 +495,21 @@
       if (!this.editor || !this.inputEl) return
 
       const incoming = (this.inputEl.value || "").trim()
-      if (!incoming) return
+      const normalizedIncoming = this.normalizeEditorData(incoming)
+
+      if (!incoming) {
+        this.editor.render({ blocks: [] }).catch(() => {})
+        return
+      }
 
       this.editor
         .save()
         .then((data) => {
-          const current = this.extractPlainText(data)
-          if (current === incoming) return
+          const current = JSON.stringify(this.stripEditorMeta(data))
+          const nextValue = JSON.stringify(this.stripEditorMeta(normalizedIncoming))
+          if (current === nextValue) return
 
-          this.editor.render({
-            blocks: [{ type: "paragraph", data: { text: incoming.replace(/\n/g, "<br>") } }]
-          })
+          this.editor.render(normalizedIncoming).catch(() => {})
         })
         .catch(() => {})
     }

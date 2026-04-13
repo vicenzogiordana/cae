@@ -350,7 +350,12 @@ defmodule Cae.MedicalRecords do
 
               case create_diagnosis(diagnosis_attrs) do
                 {:ok, diagnosis} ->
-                  case append_diagnosis_event_to_note(note, :created, diagnosis.name) do
+                  case append_diagnosis_event_to_note(
+                         note,
+                         :created,
+                         diagnosis.name,
+                         diagnosis.id
+                       ) do
                     {:ok, updated_note} -> updated_note
                     {:error, changeset} -> Repo.rollback(changeset)
                   end
@@ -377,7 +382,8 @@ defmodule Cae.MedicalRecords do
                             case append_diagnosis_event_to_note(
                                    note,
                                    :deactivated,
-                                   updated_diagnosis.name
+                                   updated_diagnosis.name,
+                                   updated_diagnosis.id
                                  ) do
                               {:ok, updated_note} -> updated_note
                               {:error, changeset} -> Repo.rollback(changeset)
@@ -398,7 +404,8 @@ defmodule Cae.MedicalRecords do
                             case append_diagnosis_event_to_note(
                                    note,
                                    :updated,
-                                   updated_diagnosis.name
+                                   updated_diagnosis.name,
+                                   updated_diagnosis.id
                                  ) do
                               {:ok, updated_note} -> updated_note
                               {:error, changeset} -> Repo.rollback(changeset)
@@ -429,9 +436,36 @@ defmodule Cae.MedicalRecords do
     end
   end
 
-  defp append_diagnosis_event_to_note(%ClinicalNote{} = note, action, diagnosis_name) do
-    marker = "[diagnostico_evento:#{action}|#{diagnosis_name}]"
-    updated_content = "#{note.encrypted_content}\n#{marker}"
+  defp append_diagnosis_event_to_note(
+         %ClinicalNote{} = note,
+         action,
+         diagnosis_name,
+         diagnosis_id
+       ) do
+    diagnosis_event = %{
+      "action" => to_string(action),
+      "diagnosis_name" => diagnosis_name,
+      "diagnosis_id" => diagnosis_id
+    }
+
+    updated_content =
+      case Jason.decode(note.encrypted_content) do
+        {:ok, payload} when is_map(payload) ->
+          payload
+          |> Map.put("diagnosis_event", diagnosis_event)
+          |> Jason.encode!()
+
+        _ ->
+          %{
+            "time" => System.system_time(:millisecond),
+            "blocks" => [
+              %{"type" => "paragraph", "data" => %{"text" => to_string(note.encrypted_content)}}
+            ],
+            "version" => "2.31.0-rc.7",
+            "diagnosis_event" => diagnosis_event
+          }
+          |> Jason.encode!()
+      end
 
     update_clinical_note(note, %{"encrypted_content" => updated_content})
   end
