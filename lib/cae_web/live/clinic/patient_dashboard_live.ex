@@ -13,7 +13,7 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
          %Accounts.User{} = student <- Accounts.get_user_by(id: parsed_student_id),
          %Accounts.StudentProfile{} = student_profile <- Accounts.get_student_profile(student.id),
          true <- student.role == "student" do
-      diagnoses = MedicalRecords.list_student_diagnoses(student.id, false)
+      diagnoses = MedicalRecords.list_student_diagnoses(student.id, true)
       clinical_notes = MedicalRecords.list_student_clinical_notes(student.id)
       current_scope = socket.assigns[:current_scope]
       current_professional = current_professional(current_scope)
@@ -149,7 +149,7 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
         {:ok, _note} ->
           # Refresh clinical notes and rebuild timeline
           clinical_notes = MedicalRecords.list_student_clinical_notes(socket.assigns.student_id)
-          diagnoses = MedicalRecords.list_student_diagnoses(socket.assigns.student_id, false)
+          diagnoses = MedicalRecords.list_student_diagnoses(socket.assigns.student_id, true)
 
           {:noreply,
            socket
