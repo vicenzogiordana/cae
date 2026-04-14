@@ -222,6 +222,50 @@ defmodule Cae.Accounts do
   end
 
   @doc """
+  Lists all active students with optional search filtering.
+
+  Preloads StudentProfile for each student. If a search_query is provided,
+  filters students by name, last name, or file number (case-insensitive).
+
+  ## Examples
+
+      iex> list_students()
+      [%User{student_profile: %StudentProfile{}}, ...]
+
+      iex> list_students("García")
+      [%User{student_profile: %StudentProfile{}}, ...]
+
+  """
+  def list_students(search_query \\ "") do
+    query =
+      from(u in User,
+        where: u.role == "student" and u.is_active == true,
+        preload: [:student_profile],
+        order_by: [u.last_name, u.first_name],
+        limit: 50
+      )
+
+    query =
+      if String.trim(search_query) == "" do
+        query
+      else
+        search_term = "%#{String.trim(search_query)}%"
+
+        from(u in query,
+          left_join: sp in StudentProfile,
+          on: sp.user_id == u.id,
+          where:
+            ilike(u.first_name, ^search_term) or
+              ilike(u.last_name, ^search_term) or
+              ilike(sp.file_number, ^search_term),
+          distinct: u.id
+        )
+      end
+
+    Repo.all(query)
+  end
+
+  @doc """
   Lists all active users.
   """
   def list_active_users do

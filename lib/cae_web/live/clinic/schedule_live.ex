@@ -497,9 +497,25 @@ defmodule CaeWeb.Clinic.ScheduleLive do
             <div class="grid gap-4 md:grid-cols-2">
               <div>
                 <p class="text-xs uppercase tracking-wide text-base-content/50">Alumno</p>
-                <p class="font-semibold">
-                  {Map.get(@selected_appointment, :student_name) || "Sin alumno asignado"}
-                </p>
+                <%= if student_id = Map.get(@selected_appointment, :student_id) do %>
+                  <div class="flex flex-col gap-2">
+                    <.link
+                      navigate={~p"/live/clinic/patients/#{student_id}"}
+                      class="font-semibold text-primary hover:underline"
+                    >
+                      {Map.get(@selected_appointment, :student_name) || "Ver alumno"}
+                    </.link>
+
+                    <.link
+                      navigate={~p"/live/clinic/patients/#{student_id}"}
+                      class="btn btn-soft btn-primary btn-sm w-fit"
+                    >
+                      Ver ficha del alumno
+                    </.link>
+                  </div>
+                <% else %>
+                  <p class="font-semibold">Sin alumno asignado</p>
+                <% end %>
               </div>
 
               <div>
@@ -685,6 +701,7 @@ defmodule CaeWeb.Clinic.ScheduleLive do
       status: appointment.status,
       status_label: appointment_status_label(appointment.status),
       professional_name: professional_name(appointment.professional),
+      student_id: appointment.student_id,
       student_name: booked_student_name(appointment),
       booked_by_name: booked_by_name(appointment),
       start_label: format_appointment_datetime(appointment.start_at),
