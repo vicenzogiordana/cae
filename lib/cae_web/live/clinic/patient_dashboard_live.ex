@@ -521,10 +521,6 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
               </div>
 
               <div class="space-y-2">
-                <label for="diagnosis-name" class="block text-sm font-medium text-base-content">
-                  Diagnóstico (opcional)
-                </label>
-
                 <select
                   id="diagnosis-id"
                   name="diagnosis_id"
@@ -543,14 +539,23 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                   </option>
                 </select>
 
-                <input
-                  id="diagnosis-name"
-                  name="diagnosis_name"
-                  type="text"
-                  value={Phoenix.HTML.Form.input_value(@new_note_form, :diagnosis_name)}
-                  placeholder="Ej: Trastorno de ansiedad generalizada"
-                  class="input input-bordered input-sm w-full"
-                />
+                <div
+                  :if={Phoenix.HTML.Form.input_value(@new_note_form, :diagnosis_id) in ["", nil]}
+                  class="space-y-2"
+                >
+                  <label for="diagnosis-name" class="block text-sm font-medium text-base-content">
+                    Diagnóstico (opcional)
+                  </label>
+
+                  <input
+                    id="diagnosis-name"
+                    name="diagnosis_name"
+                    type="text"
+                    value={Phoenix.HTML.Form.input_value(@new_note_form, :diagnosis_name)}
+                    placeholder="Ej: Trastorno de ansiedad generalizada"
+                    class="input input-bordered input-sm w-full"
+                  />
+                </div>
 
                 <label class="label cursor-pointer justify-start gap-2">
                   <input
@@ -571,8 +576,8 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                 </label>
 
                 <p class="text-xs text-base-content/60">
-                  Si seleccionas uno existente y completas nombre, lo actualiza. Si activas desactivar, lo desactiva.
-                  Si no seleccionas ninguno y completas nombre, crea uno nuevo.
+                  Si seleccionas uno existente, el campo de nombre se oculta. Si activas desactivar, lo desactiva.
+                  Si dejas el selector en "Crear nuevo diagnóstico", aparece el campo para cargar el nombre.
                 </p>
               </div>
             </div>
