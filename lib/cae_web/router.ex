@@ -36,6 +36,7 @@ defmodule CaeWeb.Router do
       live "/clinic/schedule", Clinic.ScheduleLive
       live "/clinic/patients", Clinic.PatientsLive
       live "/clinic/patients/:student_id", Clinic.PatientDashboardLive
+      live "/clinic/patients/:student_id/schedule", Clinic.PatientConsultationBookingLive
     end
 
     live_session :secretary,

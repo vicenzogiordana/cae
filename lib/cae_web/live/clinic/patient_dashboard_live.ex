@@ -262,6 +262,12 @@ defmodule CaeWeb.Clinic.PatientDashboardLive do
                   <p class="max-w-xl text-sm text-base-content/60">
                     Las sesiones más recientes se muestran abiertas y la historia antigua queda colapsada.
                   </p>
+                  <.link
+                    navigate={~p"/live/clinic/patients/#{@student_id}/schedule"}
+                    class="btn btn-soft btn-secondary btn-sm whitespace-nowrap"
+                  >
+                    <.icon name="hero-calendar-days" class="size-4" /> Reservar consulta
+                  </.link>
                   <button
                     type="button"
                     class="btn btn-primary btn-sm whitespace-nowrap"
