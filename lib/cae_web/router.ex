@@ -42,6 +42,7 @@ defmodule CaeWeb.Router do
       on_mount: [{CaeWeb.UserScope, :load_scope}] do
       live "/secretary/schedule", Secretary.ScheduleLive
       live "/secretary/students", Secretary.StudentsLive
+      live "/secretary/students/:student_id/appointments", Secretary.StudentAppointmentsLive
     end
   end
 

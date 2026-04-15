@@ -7,13 +7,11 @@ defmodule CaeWeb.Clinic.PatientConsultationBookingLive do
 
   @profession_options [
     {"Psicologia", "psychology"},
-    {"Psiquiatria", "psychiatry"},
     {"Psicopedagogia", "psychopedagogy"}
   ]
 
   @profession_role_map %{
     "psychology" => "psychologist",
-    "psychiatry" => "psychiatrist",
     "psychopedagogy" => "psychopedagogue"
   }
 

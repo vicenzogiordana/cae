@@ -225,7 +225,9 @@ defmodule Cae.Accounts do
   Lists all active students with optional search filtering.
 
   Preloads StudentProfile for each student. If a search_query is provided,
-  filters students by name, last name, or file number (case-insensitive).
+  filters students by combined full name, file number, or contact phone.
+  Search is case-insensitive, accent-insensitive, and supports multi-word
+  queries like "Sofia M".
 
   ## Examples
 
@@ -249,20 +251,45 @@ defmodule Cae.Accounts do
       if String.trim(search_query) == "" do
         query
       else
-        search_term = "%#{String.trim(search_query)}%"
+        search_tokens = normalized_search_tokens(search_query)
+
+        search_filter =
+          Enum.reduce(search_tokens, dynamic(true), fn token, dynamic_acc ->
+            like_pattern = "%#{token}%"
+
+            dynamic(
+              [u, sp],
+              ^dynamic_acc and
+                fragment(
+                  "translate(lower(concat_ws(' ', coalesce(?, ''), coalesce(?, ''), coalesce(?, ''), coalesce(?, ''))), 'áéíóúäëïöüàèìòùâêîôûãõñç', 'aeiouaeiouaeiouaeiouaonc') LIKE ?",
+                  u.first_name,
+                  u.last_name,
+                  sp.file_number,
+                  sp.emergency_contact_phone,
+                  ^like_pattern
+                )
+            )
+          end)
 
         from(u in query,
           left_join: sp in StudentProfile,
           on: sp.user_id == u.id,
-          where:
-            ilike(u.first_name, ^search_term) or
-              ilike(u.last_name, ^search_term) or
-              ilike(sp.file_number, ^search_term),
+          where: ^search_filter,
           distinct: u.id
         )
       end
 
     Repo.all(query)
+  end
+
+  defp normalized_search_tokens(search_query) do
+    search_query
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+    |> String.normalize(:nfd)
+    |> String.replace(~r/\p{M}/u, "")
+    |> String.split(~r/\s+/, trim: true)
   end
 
   @doc """

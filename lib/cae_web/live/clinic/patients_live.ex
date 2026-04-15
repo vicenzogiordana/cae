@@ -71,7 +71,7 @@ defmodule CaeWeb.Clinic.PatientsLive do
                     <th class="bg-base-200/50">Legajo</th>
                     <th class="bg-base-200/50">Carrera</th>
                     <th class="bg-base-200/50">Estado</th>
-                    <th class="bg-base-200/50">Acciones</th>
+                    <th class="bg-base-200/50 !text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody id="patients" phx-update="stream">
@@ -106,15 +106,17 @@ defmodule CaeWeb.Clinic.PatientsLive do
                         Activo
                       </span>
                     </td>
-                    <td class="text-center">
-                      <.link
-                        navigate={~p"/live/clinic/patients/#{patient.id}"}
-                        class="btn btn-sm btn-primary"
-                        aria-label="Ver perfil del paciente"
-                      >
-                        <.icon name="hero-eye" class="size-4" />
-                        <span class="hidden sm:inline">Ver</span>
-                      </.link>
+                    <td class="!text-center">
+                      <div class="flex justify-center">
+                        <.link
+                          navigate={~p"/live/clinic/patients/#{patient.id}"}
+                          class="btn btn-sm btn-primary"
+                          aria-label="Ver perfil del paciente"
+                        >
+                          <.icon name="hero-eye" class="size-4" />
+                          <span class="hidden sm:inline">Ver</span>
+                        </.link>
+                      </div>
                     </td>
                   </tr>
                 </tbody>
