@@ -206,6 +206,28 @@ defmodule Cae.Scheduling do
   end
 
   @doc """
+  Returns the nearest booked appointment for a student within the next 7 days.
+
+  Returns nil when no upcoming appointment is found in that window.
+  """
+  def get_upcoming_reminder(student_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    seven_days_from_now = DateTime.add(now, 7 * 24 * 60 * 60, :second)
+
+    from(a in Appointment,
+      where:
+        a.student_id == ^student_id and
+          a.status == "booked" and
+          a.start_at >= ^now and
+          a.start_at <= ^seven_days_from_now,
+      preload: [:professional],
+      order_by: [asc: a.start_at],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  @doc """
   Lists appointments for a professional (their schedule).
   """
   def list_professional_appointments(professional_id, start_date \\ nil, end_date \\ nil) do
