@@ -56,7 +56,7 @@ defmodule CaeWeb.Student.DashboardLive do
 
           <div class="grid grid-cols-2 gap-3">
             <.link
-              navigate={~p"/live/student/book-appointment"}
+              navigate={~p"/live/student/schedule"}
               class="card border border-primary/30 bg-primary/10 shadow-sm transition hover:-translate-y-0.5 hover:shadow"
             >
               <div class="card-body gap-2 p-4">
