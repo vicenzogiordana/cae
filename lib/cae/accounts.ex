@@ -239,57 +239,35 @@ defmodule Cae.Accounts do
 
   """
   def list_students(search_query \\ "") do
-    query =
+    base_query =
       from(u in User,
+        left_join: p in StudentProfile,
+        on: p.user_id == u.id,
         where: u.role == "student" and u.is_active == true,
-        preload: [:student_profile],
+        preload: [student_profile: p],
         order_by: [u.last_name, u.first_name],
         limit: 50
       )
 
+    terms =
+      search_query
+      |> to_string()
+      |> String.trim()
+      |> String.split(" ", trim: true)
+
     query =
-      if String.trim(search_query) == "" do
-        query
-      else
-        search_tokens = normalized_search_tokens(search_query)
+      Enum.reduce(terms, base_query, fn term, query ->
+        wildcard = "%#{term}%"
 
-        search_filter =
-          Enum.reduce(search_tokens, dynamic(true), fn token, dynamic_acc ->
-            like_pattern = "%#{token}%"
-
-            dynamic(
-              [u, sp],
-              ^dynamic_acc and
-                fragment(
-                  "translate(lower(concat_ws(' ', coalesce(?, ''), coalesce(?, ''), coalesce(?, ''), coalesce(?, ''))), 'áéíóúäëïöüàèìòùâêîôûãõñç', 'aeiouaeiouaeiouaeiouaonc') LIKE ?",
-                  u.first_name,
-                  u.last_name,
-                  sp.file_number,
-                  sp.emergency_contact_phone,
-                  ^like_pattern
-                )
-            )
-          end)
-
-        from(u in query,
-          left_join: sp in StudentProfile,
-          on: sp.user_id == u.id,
-          where: ^search_filter,
-          distinct: u.id
+        from([u, p] in query,
+          where:
+            ilike(u.first_name, ^wildcard) or
+              ilike(u.last_name, ^wildcard) or
+              ilike(p.file_number, ^wildcard)
         )
-      end
+      end)
 
     Repo.all(query)
-  end
-
-  defp normalized_search_tokens(search_query) do
-    search_query
-    |> to_string()
-    |> String.trim()
-    |> String.downcase()
-    |> String.normalize(:nfd)
-    |> String.replace(~r/\p{M}/u, "")
-    |> String.split(~r/\s+/, trim: true)
   end
 
   @doc """
