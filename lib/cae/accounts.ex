@@ -261,9 +261,9 @@ defmodule Cae.Accounts do
 
         from([u, p] in query,
           where:
-            ilike(u.first_name, ^wildcard) or
-              ilike(u.last_name, ^wildcard) or
-              ilike(p.file_number, ^wildcard)
+            fragment("unaccent(?) ILIKE unaccent(?)", u.first_name, ^wildcard) or
+              fragment("unaccent(?) ILIKE unaccent(?)", u.last_name, ^wildcard) or
+              fragment("unaccent(?) ILIKE unaccent(?)", p.file_number, ^wildcard)
         )
       end)
 
